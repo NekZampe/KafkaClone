@@ -1,0 +1,11 @@
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\bin\Debug\net9.0\KafkaClone.Storage.deps.json
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\bin\Debug\net9.0\KafkaClone.Storage.dll
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\bin\Debug\net9.0\KafkaClone.Storage.pdb
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.AssemblyInfoInputs.cache
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.AssemblyInfo.cs
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.csproj.CoreCompileInputs.cache
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.dll
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\refint\KafkaClone.Storage.dll
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\KafkaClone.Storage.pdb
+C:\Users\Nektarios\Desktop\KafkaClone\KafkaClone.Storage\obj\Debug\net9.0\ref\KafkaClone.Storage.dll
