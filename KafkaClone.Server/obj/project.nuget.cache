@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "MsblEkQgUsg=",
+  "dgSpecHash": "adi/2pot1CM=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Server\\KafkaClone.Server.csproj",
+  "projectFilePath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Server/KafkaClone.Server.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }

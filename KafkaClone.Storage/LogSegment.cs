@@ -9,12 +9,18 @@ public class LogSegment : IDisposable
 {
 
     private readonly FileStream _fileStream;
+
+    private readonly bool _autoFlush;
+
+    public long Length => _fileStream.Length;
     
-    public LogSegment(string path)
+    public LogSegment(string path, bool autoFlush = false)
 {
         _fileStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite);
 
        _fileStream.Position = _fileStream.Length;
+
+       _autoFlush = autoFlush;
     
 }
 
@@ -29,7 +35,12 @@ public class LogSegment : IDisposable
 
        long position = _fileStream.Position;
 
-        return position;
+       if (_autoFlush)
+    {
+        await _fileStream.FlushAsync();
+    }
+
+       return position;
     }
 
 

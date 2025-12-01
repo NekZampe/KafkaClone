@@ -1,75 +1,88 @@
-﻿using System;
-using System.IO;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
-using System.Text;
+using KafkaClone.Storage;
 
-class Server
+string directory = Directory.GetCurrentDirectory();
+string fullPath = Path.Combine(directory, "test.log");
+
+Console.WriteLine($"Saving logs to: {fullPath}");
+
+using LogSegment logSegment = new LogSegment(fullPath,autoFlush: true);
+
+// 1. Listen on Any IP, Port 9092
+TcpListener listener = new TcpListener(IPAddress.Any, 9092);
+
+// 2. Start the server
+listener.Start();
+Console.WriteLine("Kafka Clone listening on port 9092...");
+
+// 3. Keep the app running
+while (true)
 {
-  public static void Main()
-  {
-    TcpListener server = null;
-    try
+   TcpClient client = await listener.AcceptTcpClientAsync();
+    Console.WriteLine("Client connected!");
+    _ = HandleClientAsync(client, logSegment);
+}
+
+
+
+static async Task HandleClientAsync(TcpClient client,LogSegment logSegment)
+{
+  using (client) 
+    using (NetworkStream stream = client.GetStream())
     {
-      // Set the TcpListener on port 13000.
-      Int32 port = 9092;
-      IPAddress localAddr = IPAddress.Parse("127.0.0.1");
+    byte[] cmdBuffer = new byte[1];
 
-      // TcpListener server = new TcpListener(port);
-      server = new TcpListener(localAddr, port);
-
-      // Start listening for client requests.
-      server.Start();
-
-      // Buffer for reading data
-      Byte[] bytes = new Byte[256];
-      String data = null;
-
-      // Enter the listening loop.
-      while(true)
-      {
-        Console.Write("Waiting for a connection... ");
-
-        // Perform a blocking call to accept requests.
-        // You could also use server.AcceptSocket() here.
-        using TcpClient client = server.AcceptTcpClient();
-        Console.WriteLine("Connected!");
-
-        data = null;
-
-        // Get a stream object for reading and writing
-        NetworkStream stream = client.GetStream();
-
-        int i;
-
-        // Loop to receive all the data sent by the client.
-        while((i = stream.Read(bytes, 0, bytes.Length))!=0)
+    while (true)
         {
-          // Translate data bytes to a ASCII string.
-          data = System.Text.Encoding.ASCII.GetString(bytes, 0, i);
-          Console.WriteLine("Received: {0}", data);
 
-          // Process the data sent by the client.
-          data = data.ToUpper();
+    int bytesRead = await stream.ReadAsync(cmdBuffer);
 
-          byte[] msg = System.Text.Encoding.ASCII.GetBytes(data);
-
-          // Send back a response.
-          stream.Write(msg, 0, msg.Length);
-          Console.WriteLine("Sent: {0}", data);
-        }
-      }
-    }
-    catch(SocketException e)
+    // 1. Check for disconnect first
+    if (bytesRead == 0)
     {
-      Console.WriteLine("SocketException: {0}", e);
-    }
-    finally
-    {
-      server.Stop();
+        Console.WriteLine("Client disconnected");
+        return;
     }
 
-    Console.WriteLine("\nHit enter to continue...");
-    Console.Read();
-  }
+    // 2. Switch on the command byte
+    switch (cmdBuffer[0])
+    {
+        case 1:
+            Console.WriteLine("PRODUCE Request");
+            byte[] sizeBuffer = new byte[4];
+            await stream.ReadExactlyAsync(sizeBuffer,0,4);
+            int size = BitConverter.ToInt32(sizeBuffer,0);
+            byte[] payload = new byte[size];
+            await stream.ReadExactlyAsync(payload,0,size);
+            await logSegment.AppendAsync(payload);
+            Console.WriteLine($"Saved {size} bytes to disk.");
+            break;
+        case 2:
+            Console.WriteLine("CONSUME Request");
+
+            // New byte[] to store request size
+            byte[] offsetBytes = new byte[8];
+            await stream.ReadExactlyAsync(offsetBytes,0,8);
+            long offset = BitConverter.ToInt64(offsetBytes,0);
+            if (offset >= logSegment.Length)
+            {
+                // Send 8 bytes because the client expects a 'long'
+                long endOfFileSignal = -1;
+                await stream.WriteAsync(BitConverter.GetBytes(endOfFileSignal));
+                break;
+            }
+            byte[] messageData = await logSegment.ReadAsync(offset);
+            byte[] sizeBytes = BitConverter.GetBytes(messageData.Length);
+            long nextOffset = offset + 4 + messageData.Length;
+            await stream.WriteAsync(BitConverter.GetBytes(nextOffset));
+            await stream.WriteAsync(sizeBytes);
+            await stream.WriteAsync(messageData);
+            break;
+        default:
+            Console.WriteLine("Unknown Command");
+            break;
+    }
+    }
+    }
 }
