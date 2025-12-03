@@ -18,9 +18,9 @@ byte[] payload = Encoding.UTF8.GetBytes(message);
 Console.WriteLine("Connected! Type a message and press Enter:");
 
 Console.WriteLine("Connected! Usage:");
-Console.WriteLine("  Type '1 <message>' to PRODUCE (e.g., '1 Hello')");
-Console.WriteLine("  Type '2 <offset>'  to CONSUME (e.g., '2 0')");
-Console.WriteLine("  Type '3         '  to CONSUME ALL");
+Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 Payments 344')");
+Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 Payments 0')");
+Console.WriteLine("  Type '3 <topic>         '  to CONSUME ALL (e.g., '3 Payments')");
 
 while (true)
 {
@@ -28,19 +28,20 @@ while (true)
     string input = Console.ReadLine();
     if (string.IsNullOrEmpty(input)) break;
 
-    string[] parts = input.Split(' ', 2); // Split into "Command" and "Rest"
+    string[] parts = input.Split(' ', 3); // Split into "Command", "topic" and "Rest"
     string command = parts[0];
+    string topic = parts[1];
 
     if (command == "1" && parts.Length > 1)
-    {
-        string msg = parts[1];
-        await ProduceAsync(stream, msg);
+    {  
+        string msg = parts[2];
+        await ProduceAsync(stream,topic, msg);
     }
     else if (command == "2" && parts.Length > 1)
     {
-        if (long.TryParse(parts[1], out long offset))
+        if (long.TryParse(parts[2], out long offset))
         {   
-            long result = await ConsumeAsync(stream, offset);
+            long result = await ConsumeAsync(stream,topic,offset);
             Console.WriteLine($"Next Offset: {result}");
         }
         else
@@ -51,7 +52,7 @@ while (true)
 {
     Console.WriteLine("Streaming from beginning...");
     // Start from offset 0 and go until -1
-    await ConsumeAllAsync(stream, 0); 
+    await ConsumeAllAsync(stream, topic, 0); 
 }
     else
     {
@@ -61,14 +62,22 @@ while (true)
 
 
 // Method to write
-static async Task ProduceAsync(NetworkStream stream, string message)
+static async Task ProduceAsync(NetworkStream stream,string topic, string message)
 {
+    
     // 1. Prepare the Data
     byte[] payload = Encoding.UTF8.GetBytes(message);
     byte[] sizeBytes = BitConverter.GetBytes(payload.Length);
     
     // 2. Send Command (1 = Produce)
     await stream.WriteAsync(new byte[] { 1 });
+
+    //3.Send topic size
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
 
     // 3. Send Size (4 bytes)
     await stream.WriteAsync(sizeBytes);
@@ -77,10 +86,17 @@ static async Task ProduceAsync(NetworkStream stream, string message)
     await stream.WriteAsync(payload);
 }
 
-static async Task<long> ConsumeAsync(NetworkStream stream, long offset)
+static async Task<long> ConsumeAsync(NetworkStream stream,string topic,long offset)
 {
     // 1. Send Command (2 = Consume)
     await stream.WriteAsync(new byte[] { 2 });
+
+    //1.5 
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
 
     // 2. Send Offset (8 bytes)
     byte[] offsetBytes = BitConverter.GetBytes(offset);
@@ -121,12 +137,12 @@ static async Task<long> ConsumeAsync(NetworkStream stream, long offset)
     return nextOffset;
 }
 
-static async Task ConsumeAllAsync(NetworkStream stream, long offset)
+static async Task ConsumeAllAsync(NetworkStream stream,string topic, long offset)
 {
 
     while ( offset != -1)
     {
-        offset = await ConsumeAsync(stream,offset);
+        offset = await ConsumeAsync(stream,topic,offset);
     }
 
     return;

@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using KafkaClone.Storage;
 
 string directory = Directory.GetCurrentDirectory();
@@ -7,7 +8,7 @@ string fullPath = Path.Combine(directory, "test.log");
 
 Console.WriteLine($"Saving logs to: {fullPath}");
 
-using LogSegment logSegment = new LogSegment(fullPath,autoFlush: true);
+TopicManager topicManager = new TopicManager(Path.Combine(Directory.GetCurrentDirectory(), "kafka-data"));
 
 // 1. Listen on Any IP, Port 9092
 TcpListener listener = new TcpListener(IPAddress.Any, 9092);
@@ -21,12 +22,12 @@ while (true)
 {
    TcpClient client = await listener.AcceptTcpClientAsync();
     Console.WriteLine("Client connected!");
-    _ = HandleClientAsync(client, logSegment);
+    _ = HandleClientAsync(client, topicManager);
 }
 
 
 
-static async Task HandleClientAsync(TcpClient client,LogSegment logSegment)
+static async Task HandleClientAsync(TcpClient client,TopicManager topicManager)
 {
   using (client) 
     using (NetworkStream stream = client.GetStream())
@@ -49,7 +50,20 @@ static async Task HandleClientAsync(TcpClient client,LogSegment logSegment)
     switch (cmdBuffer[0])
     {
         case 1:
+        {
             Console.WriteLine("PRODUCE Request");
+            // 1. Get topic size
+            byte[] topicSizeBuffer = new byte[2];
+            await stream.ReadExactlyAsync(topicSizeBuffer,0,2);
+            short topicLength = BitConverter.ToInt16(topicSizeBuffer);
+            // 2. Read topic data and get Topic from TopicManager
+            byte[] topicBuffer = new byte[topicLength];
+            await stream.ReadExactlyAsync(topicBuffer,0,topicLength);
+            string topicName = Encoding.UTF8.GetString(topicBuffer);
+
+            LogSegment logSegment = topicManager.GetTopic(topicName);
+
+            //Same as before
             byte[] sizeBuffer = new byte[4];
             await stream.ReadExactlyAsync(sizeBuffer,0,4);
             int size = BitConverter.ToInt32(sizeBuffer,0);
@@ -58,9 +72,19 @@ static async Task HandleClientAsync(TcpClient client,LogSegment logSegment)
             await logSegment.AppendAsync(payload);
             Console.WriteLine($"Saved {size} bytes to disk.");
             break;
+        }
         case 2:
+        {
             Console.WriteLine("CONSUME Request");
+            byte[] topicSizeBuffer = new byte[2];
+            await stream.ReadExactlyAsync(topicSizeBuffer,0,2);
+            short topicLength = BitConverter.ToInt16(topicSizeBuffer);
+            // 2. Read topic data and get Topic from TopicManager
+            byte[] topicBuffer = new byte[topicLength];
+            await stream.ReadExactlyAsync(topicBuffer,0,topicLength);
+            string topicName = Encoding.UTF8.GetString(topicBuffer);
 
+            LogSegment logSegment = topicManager.GetTopic(topicName);
             // New byte[] to store request size
             byte[] offsetBytes = new byte[8];
             await stream.ReadExactlyAsync(offsetBytes,0,8);
@@ -79,10 +103,11 @@ static async Task HandleClientAsync(TcpClient client,LogSegment logSegment)
             await stream.WriteAsync(sizeBytes);
             await stream.WriteAsync(messageData);
             break;
+        }
         default:
             Console.WriteLine("Unknown Command");
             break;
     }
-    }
+}
     }
 }
