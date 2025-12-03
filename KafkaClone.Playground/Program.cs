@@ -20,7 +20,7 @@ Console.WriteLine("Connected! Type a message and press Enter:");
 Console.WriteLine("Connected! Usage:");
 Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 Payments 344')");
 Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 Payments 0')");
-Console.WriteLine("  Type '3 <topic>         '  to CONSUME ALL (e.g., '3 Payments')");
+Console.WriteLine("  Type '3 <GroupName> <topic> '  to CONSUME ALL (e.g., '3 Payments')");
 
 while (true)
 {
