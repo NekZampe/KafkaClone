@@ -89,7 +89,7 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager)
             byte[] offsetBytes = new byte[8];
             await stream.ReadExactlyAsync(offsetBytes,0,8);
             long offset = BitConverter.ToInt64(offsetBytes,0);
-            if (offset >= logSegment.Length)
+            if (offset * 8 >= logSegment.IndexLength)
             {
                 // Send 8 bytes because the client expects a 'long'
                 long endOfFileSignal = -1;
@@ -98,7 +98,7 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager)
             }
             byte[] messageData = await logSegment.ReadAsync(offset);
             byte[] sizeBytes = BitConverter.GetBytes(messageData.Length);
-            long nextOffset = offset + 4 + messageData.Length;
+            long nextOffset = offset + 1;
             await stream.WriteAsync(BitConverter.GetBytes(nextOffset));
             await stream.WriteAsync(sizeBytes);
             await stream.WriteAsync(messageData);
