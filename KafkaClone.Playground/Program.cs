@@ -18,45 +18,83 @@ byte[] payload = Encoding.UTF8.GetBytes(message);
 Console.WriteLine("Connected! Type a message and press Enter:");
 
 Console.WriteLine("Connected! Usage:");
-Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 Payments 344')");
-Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 Payments 0')");
-Console.WriteLine("  Type '3 <GroupName> <topic> '  to CONSUME ALL (e.g., '3 Payments')");
+Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 payments 344')");
+Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 payments 0')");
+Console.WriteLine("  Type '3 <GroupName> <topic> <offset>'  to COMMIT (e.g., '3 groupA payments 67')"); //Commit groups offset
+Console.WriteLine("  Type '4 <GroupName> <topic> '  to FETCH (e.g., '3 groupA payments')"); //Retrieves groups offset
 
+
+// MAIN LOOP
 while (true)
 {
     Console.Write("> ");
-    string input = Console.ReadLine();
+    string? input = Console.ReadLine();
     if (string.IsNullOrEmpty(input)) break;
 
-    string[] parts = input.Split(' ', 3); // Split into "Command", "topic" and "Rest"
+    // 1. SPLIT ONCE: Max 4 parts (Command, Group, Topic, Offset/Message)
+    // This covers your longest command (Case 3).
+    string[] parts = input.Split(' ', 4);
     string command = parts[0];
-    string topic = parts[1];
 
-    if (command == "1" && parts.Length > 1)
-    {  
-        string msg = parts[2];
-        await ProduceAsync(stream,topic, msg);
-    }
-    else if (command == "2" && parts.Length > 1)
+    switch (command)
     {
-        if (long.TryParse(parts[2], out long offset))
-        {   
-            long result = await ConsumeAsync(stream,topic,offset);
-            Console.WriteLine($"Next Offset: {result}");
-        }
-        else
-        {
-            Console.WriteLine("Invalid offset.");
-        }
-    }else if (command == "3")
-{
-    Console.WriteLine("Streaming from beginning...");
-    // Start from offset 0 and go until -1
-    await ConsumeAllAsync(stream, topic, 0); 
-}
-    else
-    {
-        Console.WriteLine("Unknown command. Use '1 <msg>' or '2 <offset>'");
+        case "1": // Produce: 1 <topic> <message>
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: 1 <topic> <message>");
+                break;
+            }
+            // parts[1] is topic, parts[2] is message
+            await ProduceAsync(stream, parts[1], parts[2]);
+            break;
+
+        case "2": // Consume: 2 <topic> <offset>
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: 2 <topic> <offset>");
+                break;
+            }
+            if (long.TryParse(parts[2], out long consumeOffset))
+            {
+                long result = await ConsumeAsync(stream, parts[1], consumeOffset);
+                Console.WriteLine($"Next Offset: {result}");
+            }
+            else
+            {
+                Console.WriteLine("Invalid offset.");
+            }
+            break;
+
+        case "3": // Commit: 3 <group> <topic> <offset>
+            if (parts.Length < 4)
+            {
+                Console.WriteLine("Usage: 3 <group> <topic> <offset>");
+                break;
+            }
+            if (long.TryParse(parts[3], out long commitOffset))
+            {
+                await CommitGroupOffsetAsync(stream, parts[1], parts[2], commitOffset);
+                Console.WriteLine($"Committed to group: {parts[1]}");
+            }
+            else
+            {
+                Console.WriteLine("Invalid offset.");
+            }
+            break;
+
+        case "4": // Fetch Group: 4 <group> <topic>
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: 4 <group> <topic>");
+                break;
+            }
+            long fetchResult = await FetchGroupOffsetAsync(stream, parts[1], parts[2]);
+            Console.WriteLine($"Current Offset: {fetchResult}");
+            break;
+
+        default:
+            Console.WriteLine("Unknown command.");
+            break;
     }
 }
 
@@ -137,14 +175,63 @@ static async Task<long> ConsumeAsync(NetworkStream stream,string topic,long offs
     return nextOffset;
 }
 
-static async Task ConsumeAllAsync(NetworkStream stream,string topic, long offset)
+static async Task CommitGroupOffsetAsync(NetworkStream stream,string group,string topic, long offset)
 {
+    // 0. Send Command (3 = Commit)
+    await stream.WriteAsync(new byte[] { 3 });
 
-    while ( offset != -1)
+    // 1. Convert group to byte[], get length 2 bytes
+    byte[] groupBytes = Encoding.UTF8.GetBytes(group);
+    byte[] lenGroupBytes = BitConverter.GetBytes((short)groupBytes.Length);
+    // send it
+    await stream.WriteAsync(lenGroupBytes);
+    await stream.WriteAsync(groupBytes);
+
+    //2. Convert group to bytes ( 2 bytes)
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
+
+    // 2. Send Offset (8 bytes)
+    byte[] offsetBytes = BitConverter.GetBytes(offset);
+    await stream.WriteAsync(offsetBytes);
+    
+}
+
+static async Task<long> FetchGroupOffsetAsync(NetworkStream stream,string group,string topic)
+{
+    // 0. Send Command (4 = Fetch)
+    await stream.WriteAsync(new byte[] { 4 });
+
+    // 1. Convert group to byte[], get length 2 bytes
+    byte[] groupBytes = Encoding.UTF8.GetBytes(group);
+    byte[] lenGroupBytes = BitConverter.GetBytes((short)groupBytes.Length);
+    // send it
+    await stream.WriteAsync(lenGroupBytes);
+    await stream.WriteAsync(groupBytes);
+
+    //2. Convert group to bytes ( 2 bytes)
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
+
+    //3. Create buffer to read response ( offset ) and return it
+    byte[] offsetBuffer = new byte[8];
+
+    try{
+    await stream.ReadExactlyAsync(offsetBuffer, 0, 8);
+
+    }
+    catch (EndOfStreamException)
     {
-        offset = await ConsumeAsync(stream,topic,offset);
+        Console.WriteLine($"End of Log for Group {group}");
+        return -1;
     }
 
-    return;
-    
+    return BitConverter.ToInt64(offsetBuffer,0);
+
 }

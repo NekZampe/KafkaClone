@@ -1,0 +1,8 @@
+
+# Run this in your terminal before starting the server
+rm -rf kafka-data
+dotnet run --project KafkaClone.Server
+
+
+#Run Playground
+dotnet run --project KafkaClone.Playground
