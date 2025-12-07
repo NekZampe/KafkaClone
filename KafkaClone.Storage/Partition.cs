@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 
 namespace KafkaClone.Storage;
@@ -70,7 +71,8 @@ public class Partition : IDisposable
         // STEP 2: Open that file (Reusing your old logic)
         OpenSegment(latestFileName);
 
-        _logger = logger;
+        // Verify integrity ( check index matches with log)
+        RecoverIndex();
     }
 
     // Stream opening logic
@@ -200,7 +202,7 @@ public async Task<byte[]> ReadAsync(long offset)
 }
 
 // Remove old logs
-public void PruneOldSegments(TimeSpan maxAge)
+private void PruneOldSegments(TimeSpan maxAge)
 {
     DateTime cutoff = DateTime.Now - maxAge;
     
@@ -231,6 +233,37 @@ public void PruneOldSegments(TimeSpan maxAge)
         }
     }
 }
+
+// DOESN'T WORK YET
+private void RecoverIndex()
+{
+    _logger.LogWarning("Starting Index Recovery on segment {BaseOffset}", _activeBaseOffset);
+
+    if (_indexStream.Length == 0)
+        return;
+
+    // Move to 8 bytes before the end
+    _indexStream.Seek(-8, SeekOrigin.End);
+
+    byte[] buffer = new byte[8];
+
+    // Read the last 8 bytes
+    int bytesRead = _indexStream.Read(buffer, 0, 8);
+    if (bytesRead != 8)
+        throw new IOException("Failed to read last index entry.");
+
+    long lastKnownPosition = BitConverter.ToInt64(buffer, 0);
+
+    // truncate
+    _fileStream.SetLength(lastKnownPosition);
+
+    _logger.LogInformation($"[Recovery] Recovered last known position: {lastKnownPosition}");
+    
+    // move cursor 
+    _fileStream.Position = lastKnownPosition;
+
+}
+
 
     public void Dispose()
     {

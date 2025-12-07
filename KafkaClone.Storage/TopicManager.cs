@@ -47,11 +47,11 @@ public class TopicManager
 
         ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
         
-        Partition newLogSegment = new Partition(newFolder,false, partitionLogger,TimeSpan.FromSeconds(20));
+        Partition newPartition = new Partition(newFolder,true, partitionLogger,TimeSpan.FromSeconds(20));
 
-        _topics.Add(topic,newLogSegment);
+        _topics.Add(topic,newPartition);
 
-        return newLogSegment;
+        return newPartition;
 
     }
 
