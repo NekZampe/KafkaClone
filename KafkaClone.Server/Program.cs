@@ -2,10 +2,23 @@
 using System.Net.Sockets;
 using System.Text;
 using KafkaClone.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 
 string basePath = Path.Combine(Directory.GetCurrentDirectory(), "kafka-data");
-TopicManager topicManager = new TopicManager(basePath);
+
+// 1. Setup the Logger Factory
+using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
+{
+    // This tells it to print to the screen
+    builder.AddConsole(); 
+    
+    // Optional: Set minimum level (Info, Warning, Error)
+    builder.SetMinimumLevel(LogLevel.Information); 
+});
+
+TopicManager topicManager = new TopicManager(basePath,loggerFactory);
 
 // NEW
 OffsetManager offsetManager = new OffsetManager(basePath);
@@ -51,7 +64,6 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager, 
     {
         case 1:
         {
-            Console.WriteLine("PRODUCE Request");
             // 1. Get topic size
             byte[] topicSizeBuffer = new byte[2];
             await stream.ReadExactlyAsync(topicSizeBuffer,0,2);
@@ -61,7 +73,7 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager, 
             await stream.ReadExactlyAsync(topicBuffer,0,topicLength);
             string topicName = Encoding.UTF8.GetString(topicBuffer);
 
-            LogSegment logSegment = topicManager.GetTopic(topicName);
+            Partition partition = topicManager.GetTopic(topicName);
 
             //Same as before
             byte[] sizeBuffer = new byte[4];
@@ -69,39 +81,49 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager, 
             int size = BitConverter.ToInt32(sizeBuffer,0);
             byte[] payload = new byte[size];
             await stream.ReadExactlyAsync(payload,0,size);
-            await logSegment.AppendAsync(payload);
+            await partition.AppendAsync(payload);
             Console.WriteLine($"Saved {size} bytes to disk.");
             break;
         }
         case 2:
         {
-            Console.WriteLine("CONSUME Request");
+            
+            // 1. Read Topic
             byte[] topicSizeBuffer = new byte[2];
-            await stream.ReadExactlyAsync(topicSizeBuffer,0,2);
+            await stream.ReadExactlyAsync(topicSizeBuffer, 0, 2);
             short topicLength = BitConverter.ToInt16(topicSizeBuffer);
-            // 2. Read topic data and get Topic from TopicManager
+            
             byte[] topicBuffer = new byte[topicLength];
-            await stream.ReadExactlyAsync(topicBuffer,0,topicLength);
+            await stream.ReadExactlyAsync(topicBuffer, 0, topicLength);
             string topicName = Encoding.UTF8.GetString(topicBuffer);
 
-            LogSegment logSegment = topicManager.GetTopic(topicName);
-            // New byte[] to store request size
+            Partition partition = topicManager.GetTopic(topicName);
+
+            // 2. Read Offset
             byte[] offsetBytes = new byte[8];
-            await stream.ReadExactlyAsync(offsetBytes,0,8);
-            long offset = BitConverter.ToInt64(offsetBytes,0);
-            if (offset * 8 >= logSegment.IndexLength)
+            await stream.ReadExactlyAsync(offsetBytes, 0, 8);
+            long offset = BitConverter.ToInt64(offsetBytes, 0);
+
+            // 3. TRY to read. Let the Partition decide if it exists!
+            try 
             {
-                // Send 8 bytes because the client expects a 'long'
+                byte[] messageData = await partition.ReadAsync(offset);
+                
+                // If we are here, we found it! Send it back.
+                byte[] sizeBytes = BitConverter.GetBytes(messageData.Length);
+                long nextOffset = offset + 1;
+                
+                await stream.WriteAsync(BitConverter.GetBytes(nextOffset));
+                await stream.WriteAsync(sizeBytes);
+                await stream.WriteAsync(messageData);
+            }
+            catch (IndexOutOfRangeException) // Catch the specific error from ReadAsync
+            {
+                // Message not found (End of Log)
                 long endOfFileSignal = -1;
                 await stream.WriteAsync(BitConverter.GetBytes(endOfFileSignal));
-                break;
             }
-            byte[] messageData = await logSegment.ReadAsync(offset);
-            byte[] sizeBytes = BitConverter.GetBytes(messageData.Length);
-            long nextOffset = offset + 1;
-            await stream.WriteAsync(BitConverter.GetBytes(nextOffset));
-            await stream.WriteAsync(sizeBytes);
-            await stream.WriteAsync(messageData);
+            
             break;
         }
         case 3:
@@ -168,7 +190,6 @@ static async Task HandleClientAsync(TcpClient client,TopicManager topicManager, 
             
             break;
         }
-
         default:
             Console.WriteLine("Unknown Command");
             break;

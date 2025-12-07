@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using KafkaClone.Storage;
 using System.Net;
 using System.Net.Sockets;
+using System.Globalization;
 
 // 1. Connect to the server
 using TcpClient client = new TcpClient();
@@ -21,8 +22,8 @@ Console.WriteLine("Connected! Usage:");
 Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 payments 344')");
 Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 payments 0')");
 Console.WriteLine("  Type '3 <GroupName> <topic> <offset>'  to COMMIT (e.g., '3 groupA payments 67')"); //Commit groups offset
-Console.WriteLine("  Type '4 <GroupName> <topic> '  to FETCH (e.g., '3 groupA payments')"); //Retrieves groups offset
-
+Console.WriteLine("  Type '4 <GroupName> <topic> '  to FETCH (e.g., '4 groupA payments')"); //Retrieves groups offset
+Console.WriteLine("  Type '5 <TestNumber> <NumberOfMessages> '  to Run Load Test (e.g., '5 1 85')");
 
 // MAIN LOOP
 while (true)
@@ -91,7 +92,17 @@ while (true)
             long fetchResult = await FetchGroupOffsetAsync(stream, parts[1], parts[2]);
             Console.WriteLine($"Current Offset: {fetchResult}");
             break;
+        case "5":
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: 5 <int> <int>");
+                break;
+            }
+            int.TryParse(parts[1],out int testNumber);
+            int.TryParse(parts[2],out int amount);
 
+            await RunLoadTest(stream,testNumber,amount);
+            break;
         default:
             Console.WriteLine("Unknown command.");
             break;
@@ -235,3 +246,40 @@ static async Task<long> FetchGroupOffsetAsync(NetworkStream stream,string group,
     return BitConverter.ToInt64(offsetBuffer,0);
 
 }
+
+
+static async Task RunLoadTest(NetworkStream stream,int testNumber,int amount)
+{
+    string topic = "test-" + testNumber.ToString();
+
+    for(int i= 0; i < amount; i++){
+
+        string message = "message-" + i.ToString();
+
+        await ProduceAsync(stream,topic,message);
+        
+    }
+
+    // int result = await ConsumeAllAsync(stream,topic);
+
+    Console.WriteLine("----------TEST COMPLETE----------");
+    Console.WriteLine($"Total Messages Sent: {amount}");
+    // Console.WriteLine($"Total Messages Read: {result-1}");
+
+}
+
+
+// static async Task<int> ConsumeAllAsync(NetworkStream stream,string topic)
+// {
+//     long offset = 0;
+//     int total = 0;
+
+//     while(offset != -1)
+//     {
+//         offset = await ConsumeAsync(stream,topic,offset);
+//         total++;
+//     }
+
+//     return total;
+
+// }

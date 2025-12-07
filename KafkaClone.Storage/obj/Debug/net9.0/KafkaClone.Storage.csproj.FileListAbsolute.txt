@@ -21,3 +21,4 @@ C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/ref/Ka
 /home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/refint/KafkaClone.Storage.dll
 /home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClone.Storage.pdb
 /home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/ref/KafkaClone.Storage.dll
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClone.Storage.csproj.AssemblyReference.cache
