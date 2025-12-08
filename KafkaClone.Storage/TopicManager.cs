@@ -21,7 +21,7 @@ public class TopicManager
 
     private int _defaultPartitions;
 
-    public TopicManager(string basePath, ILoggerFactory loggerFactory, int defaultPartitions = 3)
+    public TopicManager(string basePath, ILoggerFactory loggerFactory, int defaultPartitions = 1)
     {
         _basePath = basePath;
         _loggerFactory = loggerFactory;
@@ -31,17 +31,21 @@ public class TopicManager
     }
 
 
-    public Partition GetTopic(string topic)
+    public Partition GetTopic(string topic,int index = -1)
     {
         // Ensure valid param
         if (string.IsNullOrEmpty(topic)) return null;
 
-        // If topic exists return logSegment right away
-        if (_topics.TryGetValue(topic,out List<Partition> partitions))
+        // If topic exists return logSegment right away based on provided index if any
+        if (_topics.TryGetValue(topic, out var partitions))
         {
-            return RoundRobin(topic,partitions);
-        }
+            if (index < 0 )
+                return RoundRobin(topic, partitions);
 
+            if (index <= partitions.Count() - 1)
+                return partitions[index];
+        }
+        
         // Partition doesn't exist so create it
         // First verify base path exists
         if (!Directory.Exists(_basePath))
@@ -53,6 +57,7 @@ public class TopicManager
 
         List<Partition> newPartitions = new List<Partition>();
         
+    
         for(int i = 0; i < _defaultPartitions; i++)
         {
             string newFolder = Path.Combine(_basePath,topic,$"{topic}-{i}");
@@ -63,14 +68,16 @@ public class TopicManager
         _topics[topic] = newPartitions;
         _roundRobinCounters[topic] = 0;
 
-    
+        if (index <= newPartitions.Count() - 1 && index > -1)
+            return newPartitions[index];
+
         return RoundRobin(topic,newPartitions);
-
     }
-
 
     private Partition RoundRobin(string topic, List<Partition> partitions)
     {
+
+        if (partitions.Count() == 1) return partitions[0];
         
         _roundRobinCounters.TryGetValue(topic, out var current);
 
@@ -80,9 +87,4 @@ public class TopicManager
 
         return partitions[next];
     }
-
-
-    
-
-    
 }
