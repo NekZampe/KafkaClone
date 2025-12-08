@@ -234,7 +234,6 @@ private void PruneOldSegments(TimeSpan maxAge)
     }
 }
 
-// DOESN'T WORK YET
 private void RecoverIndex()
 {
     _logger.LogWarning("Starting Index Recovery on segment {BaseOffset}", _activeBaseOffset);

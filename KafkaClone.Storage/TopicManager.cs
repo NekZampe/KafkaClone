@@ -13,15 +13,21 @@ public class TopicManager
     private readonly string _basePath;
 
     // Topic name (unique), Partition obj
-    private Dictionary<string,Partition> _topics;
+    private Dictionary<string,List<Partition>> _topics;
 
     private readonly ILoggerFactory _loggerFactory;
 
-    public TopicManager(string basePath, ILoggerFactory loggerFactory)
+    private Dictionary<string, int> _roundRobinCounters;
+
+    private int _defaultPartitions;
+
+    public TopicManager(string basePath, ILoggerFactory loggerFactory, int defaultPartitions = 3)
     {
         _basePath = basePath;
         _loggerFactory = loggerFactory;
-        _topics = new Dictionary<string,Partition>();
+        _topics = new Dictionary<string,List<Partition>>();
+        _roundRobinCounters = new Dictionary<string, int>();
+        _defaultPartitions = defaultPartitions;
     }
 
 
@@ -31,9 +37,9 @@ public class TopicManager
         if (string.IsNullOrEmpty(topic)) return null;
 
         // If topic exists return logSegment right away
-        if (_topics.TryGetValue(topic,out Partition value))
+        if (_topics.TryGetValue(topic,out List<Partition> partitions))
         {
-            return value;
+            return RoundRobin(topic,partitions);
         }
 
         // Partition doesn't exist so create it
@@ -43,17 +49,40 @@ public class TopicManager
             Directory.CreateDirectory(_basePath);
         }
 
-        string newFolder = Path.Combine(_basePath,topic);
-
         ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+
+        List<Partition> newPartitions = new List<Partition>();
         
-        Partition newPartition = new Partition(newFolder,true, partitionLogger,TimeSpan.FromSeconds(20));
+        for(int i = 0; i < _defaultPartitions; i++)
+        {
+            string newFolder = Path.Combine(_basePath,topic,$"{topic}-{i}");
+            Partition newPartition = new Partition(newFolder,true, partitionLogger,TimeSpan.FromSeconds(20));
+            newPartitions.Add(newPartition);
+        }
 
-        _topics.Add(topic,newPartition);
+        _topics[topic] = newPartitions;
+        _roundRobinCounters[topic] = 0;
 
-        return newPartition;
+    
+        return RoundRobin(topic,newPartitions);
 
     }
+
+
+    private Partition RoundRobin(string topic, List<Partition> partitions)
+    {
+        
+        _roundRobinCounters.TryGetValue(topic, out var current);
+
+        int next = (current + 1) %  partitions.Count();
+
+        _roundRobinCounters[topic] = next;
+
+        return partitions[next];
+    }
+
+
+    
 
     
 }
