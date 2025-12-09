@@ -142,6 +142,90 @@ public class Partition : IDisposable
         return currentLogicalId;
     }
 
+    public async Task<long> AppendBatchAsync(List<byte[]> data)
+    {
+
+        long lastLogicalId = _activeBaseOffset;
+        List<List<byte>> fileBuffer = new List<List<byte>>{new List<byte>()};
+        List<List<byte>> indexBuffer = new List<List<byte>>{new List<byte>()};
+
+        List<long> nextIdList = new List<long>{0};
+
+        int currentList = 0;
+
+        long fileStreamPosition = _fileStream.Position;
+        long indexStreamLength = _indexStream.Length;
+
+        foreach(var value in data){
+
+        long currentLogicalId = _activeBaseOffset + (indexStreamLength / 8);
+        long startingPosition = fileStreamPosition;
+        lastLogicalId = currentLogicalId;
+
+        // 2. Add to the file buffer
+        byte[] lengthBytes = BitConverter.GetBytes(value.Length);
+        fileBuffer[currentList].AddRange(lengthBytes);
+        fileBuffer[currentList].AddRange(value);
+
+        fileStreamPosition += lengthBytes.Length + value.Length;
+
+        // 3. Add to the index buffer
+        indexBuffer[currentList].AddRange(BitConverter.GetBytes(startingPosition));
+
+        indexStreamLength += 8;
+
+        // 4. Check for Roll Over
+        if (fileStreamPosition >= _maxFileSize)
+            {
+            // The NEXT message will be at ID = current + 1
+            long nextId = currentLogicalId + 1;
+
+            nextIdList.Add(nextId);
+
+            fileBuffer.Add(new List<byte>());
+            indexBuffer.Add(new List<byte>());
+
+            currentList++;
+            }
+        }
+            // Handle creation of new files
+            for(int i = 0;i < fileBuffer.Count(); i++ )
+        {
+            if ( i > 0){
+
+            string newFileName = nextIdList[i].ToString("D5");
+
+            // Close the old file
+            Dispose();
+
+            // Open the new one
+            OpenSegment(newFileName);
+
+            await _fileStream.WriteAsync(fileBuffer[i].ToArray());
+            await _indexStream.WriteAsync(indexBuffer[i].ToArray());
+
+            //Run Prune to remove old files
+            PruneOldSegments(_retentionMaxAge);
+
+            }
+            else
+            {
+            await _fileStream.WriteAsync(fileBuffer[i].ToArray());
+            await _indexStream.WriteAsync(indexBuffer[i].ToArray());
+            }
+
+        }
+
+        if (_autoFlush)
+        {
+            await _fileStream.FlushAsync();
+            await _indexStream.FlushAsync();
+        }
+
+        // 5. Return the ID of the last message we wrote
+        return lastLogicalId;
+    }
+
 
     public async Task<byte[]> ReadAsync(long offset)
     {
@@ -262,6 +346,8 @@ public class Partition : IDisposable
         _fileStream.Position = lastKnownPosition;
 
     }
+
+
 
 
     public void Dispose()

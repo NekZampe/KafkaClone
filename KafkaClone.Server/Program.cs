@@ -247,6 +247,51 @@ class Program
                                 Console.WriteLine($"[Fetch] Group '{group}' on '{topic}-{partitionId}' is @ {storedOffset}");
                                 break;
                             }
+                            case 5:
+                            {
+                                // --------------------------- BATCH PRODUCE ---------------------------
+                                // Protocol: |5|len|topic|4|batchsize|len_msg1|msg1|len_msg2|mesg2|...
+                                // --------------------------------------------------------------------
+
+                                 // 1. Read Topic
+                                byte[] topicLenBuf = new byte[2];
+                                await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
+                                short topicLen = BitConverter.ToInt16(topicLenBuf);
+
+                                byte[] topicBuf = new byte[topicLen];
+                                await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
+                                string topicName = Encoding.UTF8.GetString(topicBuf);
+
+                                // 2. Get Partition (Round Robin)
+                                Partition partition = topicManager.GetTopic(topicName);
+
+                                //New
+                                byte[] msgCountBuf = new byte[4];
+                                await stream.ReadExactlyAsync(msgCountBuf, 0, 4);
+                                int msgCount = BitConverter.ToInt32(msgCountBuf);
+
+                                List<byte[]> cache = new List<byte[]>();
+
+                                for (int i=0; i< msgCount; i++)
+                                {
+                                        // 3. Read Payload Size
+                                    byte[] sizeBuf = new byte[4];
+                                    await stream.ReadExactlyAsync(sizeBuf, 0, 4);
+                                    int size = BitConverter.ToInt32(sizeBuf);
+
+                                    // 4. Read Payload
+                                    byte[] payload = new byte[size];
+                                    await stream.ReadExactlyAsync(payload, 0, size);
+
+                                    cache.Add(payload);
+                                }
+
+                                await partition.AppendBatchAsync(cache);
+
+                                Console.WriteLine($"[BatchProduce] Saved {msgCount} messages to '{topicName}'");
+
+                                break;
+                            }
 
                         default:
                             Console.WriteLine($"Unknown Command: {cmdBuffer[0]}");

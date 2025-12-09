@@ -24,7 +24,8 @@ Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 payments 34
 Console.WriteLine("  Type '2 <topic> <partitionId> <offset>'  to CONSUME (e.g., '2 payments 0 -200$')");
 Console.WriteLine("  Type '3 <group> <topic> <partitionId> <offset>'  to COMMIT (e.g., '3 groupA payments 0 34')"); //Commit groups offset
 Console.WriteLine("  Type '4 <group> <topic> <partitionId>'  to FETCH (e.g., '4 groupA payments 0')"); //Retrieves groups offset
-Console.WriteLine("  Type '5 <topic> <NumberOfMessages>' to Run Load Test (e.g., '5 payments 100')");
+Console.WriteLine("  Type '5 <topic> <message1>,<message2>...' to BATCH PRODUCE (e.g., '1 payments +344$ -22$ +3758$')");
+Console.WriteLine("  Type 'test <topic> <NumberOfMessages>' to Run Load Test (e.g., '5 payments 100')");
 
 // MAIN LOOP
 while (true)
@@ -121,7 +122,20 @@ while (true)
                 }
                 break;
             }
-        case "5":
+
+            case "5": // batch Produce: 1 <topic> <messageCount> <message1> <message2>...
+            {
+            string[] batchParts = input.Split(' ', 3);
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: 5 <topic> <messageCount> <message1> <message2>...");
+                break;
+            }
+                await ProduceBatchAsync(stream, batchParts[1], batchParts[2]);
+           
+            break;
+            }
+        case "test":
             if (parts.Length < 3)
             {
                 Console.WriteLine("Usage: 5 <topic> <NumberOfMessages>");
@@ -159,7 +173,8 @@ static async Task CreateTopicAsync(NetworkStream stream, string topic, int count
     byte[] ack = new byte[1];
     await stream.ReadExactlyAsync(ack, 0, 1);
 }
-// Method to write
+
+// Produce single message
 static async Task ProduceAsync(NetworkStream stream, string topic, string message)
 {
 
@@ -324,4 +339,41 @@ static async Task RunLoadTest(NetworkStream stream, string topic, int amount)
     Console.WriteLine("----------TEST COMPLETE----------");
     Console.WriteLine($"Total Messages Sent: {amount}");
 
+}
+
+
+// Produce Batch Method
+static async Task ProduceBatchAsync(NetworkStream stream, string topic, string messages)
+{
+    // 1. Send cmd
+    await stream.WriteAsync(new byte[] { 5 });
+
+    // 2. Send topic
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
+
+    var options = StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries;
+    string[] parts = messages.Split(',', options);
+
+    int msgCount = parts.Length; 
+
+    // 3. Send message count
+    byte[] msgCountBytes = BitConverter.GetBytes(msgCount);
+    await stream.WriteAsync(msgCountBytes);
+
+    List<byte> payload = new List<byte>();
+
+    foreach(var part in parts)
+    {
+        byte[] msg = Encoding.UTF8.GetBytes(part);
+        byte[] msgLen = BitConverter.GetBytes(msg.Length);
+
+        payload.AddRange(msgLen);
+        payload.AddRange(msg);
+    }
+
+    await stream.WriteAsync(payload.ToArray());
 }
