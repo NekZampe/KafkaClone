@@ -13,9 +13,9 @@ public class OffsetManager
     public OffsetManager(string basePath)
     {
 
-        _offsets = new Dictionary<string,long>();
+        _offsets = new Dictionary<string, long>();
 
-        _storagePath = Path.Combine(basePath,"consumer_offsets.dat");
+        _storagePath = Path.Combine(basePath, "consumer_offsets.dat");
 
         if (File.Exists(_storagePath))
         {
@@ -27,9 +27,12 @@ public class OffsetManager
     /// <summary>
     /// Saves the "Bookmark". The client tells us "I have finished processing up to Offset X".
     /// </summary>
-    public async Task CommitOffset(string group, string topic, long offset)
+    public async Task CommitOffset(string group, string topic, int partitionId, long offset)
     {
-        string key = $"{group}|{topic}";
+        group = Uri.EscapeDataString(group);
+        topic = Uri.EscapeDataString(topic);
+
+        string key = $"{group}|{topic}|{partitionId}";
         _offsets[key] = offset;
         await SaveToDiskAsync();
     }
@@ -37,11 +40,14 @@ public class OffsetManager
     /// <summary>
     /// Retrieves the "Bookmark". If this group has never seen this topic, return 0.
     /// </summary>
-    public long GetOffset(string group, string topic)
+    public long GetOffset(string group, string topic, int partitionId)
     {
-        string key = $"{group}|{topic}";
+        group = Uri.EscapeDataString(group);
+        topic = Uri.EscapeDataString(topic);
 
-        if (_offsets.TryGetValue(key,out long value))
+        string key = $"{group}|{topic}|{partitionId}";
+
+        if (_offsets.TryGetValue(key, out long value))
         {
             return value;
         }
@@ -57,8 +63,8 @@ public class OffsetManager
         foreach (var kvp in _offsets)
         {
             var parts = kvp.Key.Split('|');
-            lines.Add($"{parts[0]},{parts[1]},{kvp.Value}");
-            
+            lines.Add($"{parts[0]},{parts[1]},{parts[2]},{kvp.Value}");
+
         }
 
         await File.WriteAllLinesAsync(_storagePath, lines);
@@ -68,14 +74,14 @@ public class OffsetManager
     private void LoadFromDisk()
     {
         foreach (var line in File.ReadAllLines(_storagePath))
+        {
+            // Format: "group,topic,partitionId,offset"
+            var parts = line.Split(',');
+            if (parts.Length == 4 && long.TryParse(parts[3], out long offset) && int.TryParse(parts[2], out int partId))
             {
-                // Format: "group,topic,offset"
-                var parts = line.Split(',');
-                if (parts.Length == 3 && long.TryParse(parts[2], out long offset))
-                {
-                    string key = $"{parts[0]}|{parts[1]}"; // Composite Key
-                    _offsets[key] = offset;
-                }
+                string key = $"{parts[0]}|{parts[1]}|{partId}"; // Composite Key
+                _offsets[key] = offset;
             }
+        }
     }
 }

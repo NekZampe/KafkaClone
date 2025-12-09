@@ -13,7 +13,7 @@ public class TopicManager
     private readonly string _basePath;
 
     // Topic name (unique), Partition obj
-    private Dictionary<string,List<Partition>> _topics;
+    private Dictionary<string, List<Partition>> _topics;
 
     private readonly ILoggerFactory _loggerFactory;
 
@@ -25,13 +25,43 @@ public class TopicManager
     {
         _basePath = basePath;
         _loggerFactory = loggerFactory;
-        _topics = new Dictionary<string,List<Partition>>();
+        _topics = new Dictionary<string, List<Partition>>();
         _roundRobinCounters = new Dictionary<string, int>();
         _defaultPartitions = defaultPartitions;
     }
+    public void CreateTopic(string topic, int partitionCount)
+    {
+        // 1. Safety Check: Don't overwrite existing topics
+        if (_topics.ContainsKey(topic) || Directory.Exists(Path.Combine(_basePath, topic)))
+        {
+            Console.WriteLine($"Topic '{topic}' already exists. Skipping creation.");
+            return;
+        }
 
+        // 2. Prepare for creation
+        if (!Directory.Exists(_basePath)) Directory.CreateDirectory(_basePath);
 
-    public Partition GetTopic(string topic,int index = -1)
+        ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+        List<Partition> newPartitions = new List<Partition>();
+
+        // 3. Create the specific number of partitions requested
+        for (int i = 0; i < partitionCount; i++)
+        {
+            string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
+
+            // Logic reused from your existing code
+            Partition newPartition = new Partition(newFolder, true, partitionLogger, TimeSpan.FromSeconds(20));
+            newPartitions.Add(newPartition);
+        }
+
+        // 4. Register it in memory
+        _topics[topic] = newPartitions;
+        _roundRobinCounters[topic] = 0;
+
+        Console.WriteLine($"Created topic '{topic}' with {partitionCount} partitions.");
+    }
+
+    public Partition GetTopic(string topic, int index = -1)
     {
         // Ensure valid param
         if (string.IsNullOrEmpty(topic)) return null;
@@ -39,13 +69,13 @@ public class TopicManager
         // If topic exists return logSegment right away based on provided index if any
         if (_topics.TryGetValue(topic, out var partitions))
         {
-            if (index < 0 )
+            if (index < 0)
                 return RoundRobin(topic, partitions);
 
             if (index <= partitions.Count() - 1)
                 return partitions[index];
         }
-        
+
         // Partition doesn't exist so create it
         // First verify base path exists
         if (!Directory.Exists(_basePath))
@@ -56,12 +86,12 @@ public class TopicManager
         ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
 
         List<Partition> newPartitions = new List<Partition>();
-        
-    
-        for(int i = 0; i < _defaultPartitions; i++)
+
+
+        for (int i = 0; i < _defaultPartitions; i++)
         {
-            string newFolder = Path.Combine(_basePath,topic,$"{topic}-{i}");
-            Partition newPartition = new Partition(newFolder,true, partitionLogger,TimeSpan.FromSeconds(20));
+            string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
+            Partition newPartition = new Partition(newFolder, true, partitionLogger, TimeSpan.FromSeconds(20));
             newPartitions.Add(newPartition);
         }
 
@@ -71,17 +101,17 @@ public class TopicManager
         if (index <= newPartitions.Count() - 1 && index > -1)
             return newPartitions[index];
 
-        return RoundRobin(topic,newPartitions);
+        return RoundRobin(topic, newPartitions);
     }
 
     private Partition RoundRobin(string topic, List<Partition> partitions)
     {
 
         if (partitions.Count() == 1) return partitions[0];
-        
+
         _roundRobinCounters.TryGetValue(topic, out var current);
 
-        int next = (current + 1) %  partitions.Count();
+        int next = (current + 1) % partitions.Count();
 
         _roundRobinCounters[topic] = next;
 

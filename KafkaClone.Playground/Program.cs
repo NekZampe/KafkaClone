@@ -19,11 +19,12 @@ byte[] payload = Encoding.UTF8.GetBytes(message);
 Console.WriteLine("Connected! Type a message and press Enter:");
 
 Console.WriteLine("Connected! Usage:");
+Console.WriteLine("  Type '0 <topic> <partitionCount>' to CREATE NEW TOPIC (e.g., '0 payments 3')");
 Console.WriteLine("  Type '1 <topic> <message>' to PRODUCE (e.g., '1 payments 344')");
-Console.WriteLine("  Type '2 <topic> <offset>'  to CONSUME (e.g., '2 payments 0')");
-Console.WriteLine("  Type '3 <GroupName> <topic> <offset>'  to COMMIT (e.g., '3 groupA payments 67')"); //Commit groups offset
-Console.WriteLine("  Type '4 <GroupName> <topic> '  to FETCH (e.g., '4 groupA payments')"); //Retrieves groups offset
-Console.WriteLine("  Type '5 <TestNumber> <NumberOfMessages> '  to Run Load Test (e.g., '5 1 85')");
+Console.WriteLine("  Type '2 <topic> <partitionId> <offset>'  to CONSUME (e.g., '2 payments 0 -200$')");
+Console.WriteLine("  Type '3 <group> <topic> <partitionId> <offset>'  to COMMIT (e.g., '3 groupA payments 0 34')"); //Commit groups offset
+Console.WriteLine("  Type '4 <group> <topic> <partitionId>'  to FETCH (e.g., '4 groupA payments 0')"); //Retrieves groups offset
+Console.WriteLine("  Type '5 <topic> <NumberOfMessages>' to Run Load Test (e.g., '5 payments 100')");
 
 // MAIN LOOP
 while (true)
@@ -32,13 +33,28 @@ while (true)
     string? input = Console.ReadLine();
     if (string.IsNullOrEmpty(input)) break;
 
-    // 1. SPLIT ONCE: Max 4 parts (Command, Group, Topic, Offset/Message)
+    // 1. SPLIT ONCE: Max 4 parts (Command, Group, Topic, key, Offset/Message)
     // This covers your longest command (Case 3).
-    string[] parts = input.Split(' ', 4);
+    string[] parts = input.Split(' ', 5);
     string command = parts[0];
 
     switch (command)
     {
+        case "0": // Create: 0 <topic> <partitionCount>
+            {
+                if (parts.Length < 3)
+                {
+                    Console.WriteLine("Usage: 0 <topic> <partitionCount>");
+                    break;
+                }
+
+                if (int.TryParse(parts[2], out int count))
+                {
+                    await CreateTopicAsync(stream, parts[1], count);
+                    Console.WriteLine($"Request sent to create topic '{parts[1]}' with {count} partitions.");
+                }
+                break;
+            }
         case "1": // Produce: 1 <topic> <message>
             if (parts.Length < 3)
             {
@@ -49,59 +65,74 @@ while (true)
             await ProduceAsync(stream, parts[1], parts[2]);
             break;
 
-        case "2": // Consume: 2 <topic> <offset>
-            if (parts.Length < 3)
+        case "2": // Consume: 2 <topic> <partitionId> <offset>
             {
-                Console.WriteLine("Usage: 2 <topic> <offset>");
+                if (parts.Length < 4)
+                {
+                    Console.WriteLine("Usage: 2 <topic> <partitionId> <offset>");
+                    break;
+                }
+                if (int.TryParse(parts[2], out int partitionId) && long.TryParse(parts[3], out long consumeOffset))
+                {
+                    if (partitionId < 0) partitionId = -1;
+                    long result = await ConsumeAsync(stream, parts[1], partitionId, consumeOffset);
+                    Console.WriteLine($"Next Offset: {result}");
+                }
+                else
+                {
+                    Console.WriteLine("Invalid offset.");
+                }
                 break;
             }
-            if (long.TryParse(parts[2], out long consumeOffset))
+        case "3": // Commit: 3 <group> <topic> <partitionId> <offset>
             {
-                long result = await ConsumeAsync(stream, parts[1], consumeOffset);
-                Console.WriteLine($"Next Offset: {result}");
+                if (parts.Length < 5)
+                {
+                    Console.WriteLine("Usage: 3 <group> <topic> <partitionId> <offset>");
+                    break;
+                }
+                if (int.TryParse(parts[3], out int partitionId) && long.TryParse(parts[4], out long commitOffset))
+                {
+                    await CommitGroupOffsetAsync(stream, parts[1], parts[2], partitionId, commitOffset);
+                    Console.WriteLine($"Committed: Group '{parts[1]}' on '{parts[2]}' part {partitionId} at offset {commitOffset}");
+                }
+                else
+                {
+                    Console.WriteLine("Invalid offset.");
+                }
+                break;
             }
-            else
+        case "4": // Fetch Group: 4 <group> <topic> <partitionId>
             {
-                Console.WriteLine("Invalid offset.");
-            }
-            break;
+                if (parts.Length < 4)
+                {
+                    Console.WriteLine("Usage: 4 <group> <topic> <partitionId>");
+                    break;
+                }
+                if (int.TryParse(parts[3], out int partitionId))
+                {
 
-        case "3": // Commit: 3 <group> <topic> <offset>
-            if (parts.Length < 4)
-            {
-                Console.WriteLine("Usage: 3 <group> <topic> <offset>");
+                    long fetchResult = await FetchGroupOffsetAsync(stream, parts[1], parts[2], partitionId);
+                    Console.WriteLine($"Current Offset: {fetchResult}");
+                }
+                else
+                {
+                    Console.WriteLine("Invalid partition ID.");
+                }
                 break;
             }
-            if (long.TryParse(parts[3], out long commitOffset))
-            {
-                await CommitGroupOffsetAsync(stream, parts[1], parts[2], commitOffset);
-                Console.WriteLine($"Committed to group: {parts[1]}");
-            }
-            else
-            {
-                Console.WriteLine("Invalid offset.");
-            }
-            break;
-
-        case "4": // Fetch Group: 4 <group> <topic>
-            if (parts.Length < 3)
-            {
-                Console.WriteLine("Usage: 4 <group> <topic>");
-                break;
-            }
-            long fetchResult = await FetchGroupOffsetAsync(stream, parts[1], parts[2]);
-            Console.WriteLine($"Current Offset: {fetchResult}");
-            break;
         case "5":
             if (parts.Length < 3)
             {
-                Console.WriteLine("Usage: 5 <int> <int>");
+                Console.WriteLine("Usage: 5 <topic> <NumberOfMessages>");
                 break;
             }
-            int.TryParse(parts[1],out int testNumber);
-            int.TryParse(parts[2],out int amount);
 
-            await RunLoadTest(stream,testNumber,amount);
+            if( int.TryParse(parts[2], out int amount))
+            {
+                
+            await RunLoadTest(stream,parts[1],amount);
+            }
             break;
         default:
             Console.WriteLine("Unknown command.");
@@ -109,15 +140,33 @@ while (true)
     }
 }
 
-
-// Method to write
-static async Task ProduceAsync(NetworkStream stream,string topic, string message)
+static async Task CreateTopicAsync(NetworkStream stream, string topic, int count)
 {
-    
+    // 0. Send Command (0)
+    await stream.WriteAsync(new byte[] { 0 });
+
+    // 1. Send Topic Name
+    byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
+    byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
+    await stream.WriteAsync(topicLengthBytes);
+    await stream.WriteAsync(topicBytes);
+
+    // 2. Send Partition Count
+    byte[] countBytes = BitConverter.GetBytes(count);
+    await stream.WriteAsync(countBytes);
+
+    // 3. Wait for Ack (1 byte)
+    byte[] ack = new byte[1];
+    await stream.ReadExactlyAsync(ack, 0, 1);
+}
+// Method to write
+static async Task ProduceAsync(NetworkStream stream, string topic, string message)
+{
+
     // 1. Prepare the Data
     byte[] payload = Encoding.UTF8.GetBytes(message);
     byte[] sizeBytes = BitConverter.GetBytes(payload.Length);
-    
+
     // 2. Send Command (1 = Produce)
     await stream.WriteAsync(new byte[] { 1 });
 
@@ -135,27 +184,32 @@ static async Task ProduceAsync(NetworkStream stream,string topic, string message
     await stream.WriteAsync(payload);
 }
 
-static async Task<long> ConsumeAsync(NetworkStream stream,string topic,long offset)
+static async Task<long> ConsumeAsync(NetworkStream stream, string topic, int partitionId, long offset)
 {
-    // 1. Send Command (2 = Consume)
+    // 0. Send Command (2 = Consume)
     await stream.WriteAsync(new byte[] { 2 });
 
-    //1.5 
+    // 1. Send Topic
     byte[] topicBytes = Encoding.UTF8.GetBytes(topic);
     byte[] topicLengthBytes = BitConverter.GetBytes((short)topicBytes.Length);
 
     await stream.WriteAsync(topicLengthBytes);
     await stream.WriteAsync(topicBytes);
 
-    // 2. Send Offset (8 bytes)
+    // 2. Send Partition ID (4 Bytes -> int)
+    byte[] partIdBytes = BitConverter.GetBytes(partitionId);
+    await stream.WriteAsync(partIdBytes);
+
+    // 3. Send Offset (8 bytes)
     byte[] offsetBytes = BitConverter.GetBytes(offset);
     await stream.WriteAsync(offsetBytes);
 
     // 2.1 Read nextOffset
     byte[] nextOffsetBuffer = new byte[8];
 
-    try{
-    await stream.ReadExactlyAsync(nextOffsetBuffer, 0, 8);
+    try
+    {
+        await stream.ReadExactlyAsync(nextOffsetBuffer, 0, 8);
 
     }
     catch (EndOfStreamException)
@@ -163,7 +217,7 @@ static async Task<long> ConsumeAsync(NetworkStream stream,string topic,long offs
         Console.WriteLine("End of Log (Server disconnected).");
         return -1;
     }
-    long nextOffset = BitConverter.ToInt64(nextOffsetBuffer,0);
+    long nextOffset = BitConverter.ToInt64(nextOffsetBuffer, 0);
 
     if (nextOffset == -1)
     {
@@ -186,7 +240,7 @@ static async Task<long> ConsumeAsync(NetworkStream stream,string topic,long offs
     return nextOffset;
 }
 
-static async Task CommitGroupOffsetAsync(NetworkStream stream,string group,string topic, long offset)
+static async Task CommitGroupOffsetAsync(NetworkStream stream, string group, string topic, int partitionId, long offset)
 {
     // 0. Send Command (3 = Commit)
     await stream.WriteAsync(new byte[] { 3 });
@@ -205,13 +259,17 @@ static async Task CommitGroupOffsetAsync(NetworkStream stream,string group,strin
     await stream.WriteAsync(topicLengthBytes);
     await stream.WriteAsync(topicBytes);
 
+    // 2. Send Partition ID (4 Bytes -> int)
+    byte[] partIdBytes = BitConverter.GetBytes(partitionId);
+    await stream.WriteAsync(partIdBytes);
+
     // 2. Send Offset (8 bytes)
     byte[] offsetBytes = BitConverter.GetBytes(offset);
     await stream.WriteAsync(offsetBytes);
-    
+
 }
 
-static async Task<long> FetchGroupOffsetAsync(NetworkStream stream,string group,string topic)
+static async Task<long> FetchGroupOffsetAsync(NetworkStream stream, string group, string topic, int partitionId)
 {
     // 0. Send Command (4 = Fetch)
     await stream.WriteAsync(new byte[] { 4 });
@@ -230,11 +288,16 @@ static async Task<long> FetchGroupOffsetAsync(NetworkStream stream,string group,
     await stream.WriteAsync(topicLengthBytes);
     await stream.WriteAsync(topicBytes);
 
+    // 3. Send Partition ID (4 Bytes -> int)
+    byte[] partIdBytes = BitConverter.GetBytes(partitionId);
+    await stream.WriteAsync(partIdBytes);
+
     //3. Create buffer to read response ( offset ) and return it
     byte[] offsetBuffer = new byte[8];
 
-    try{
-    await stream.ReadExactlyAsync(offsetBuffer, 0, 8);
+    try
+    {
+        await stream.ReadExactlyAsync(offsetBuffer, 0, 8);
 
     }
     catch (EndOfStreamException)
@@ -243,43 +306,22 @@ static async Task<long> FetchGroupOffsetAsync(NetworkStream stream,string group,
         return -1;
     }
 
-    return BitConverter.ToInt64(offsetBuffer,0);
+    return BitConverter.ToInt64(offsetBuffer, 0);
 
 }
 
 
-static async Task RunLoadTest(NetworkStream stream,int testNumber,int amount)
+static async Task RunLoadTest(NetworkStream stream, string topic, int amount)
 {
-    string topic = "test-" + testNumber.ToString();
-
-    for(int i= 0; i < amount; i++){
-
+    
+    for (int i = 0; i < amount; i++)
+    {
         string message = "message-" + i.ToString();
 
-        await ProduceAsync(stream,topic,message);
-        
+        await ProduceAsync(stream, topic, message);
     }
-
-    // int result = await ConsumeAllAsync(stream,topic);
 
     Console.WriteLine("----------TEST COMPLETE----------");
     Console.WriteLine($"Total Messages Sent: {amount}");
-    // Console.WriteLine($"Total Messages Read: {result-1}");
 
 }
-
-
-// static async Task<int> ConsumeAllAsync(NetworkStream stream,string topic)
-// {
-//     long offset = 0;
-//     int total = 0;
-
-//     while(offset != -1)
-//     {
-//         offset = await ConsumeAsync(stream,topic,offset);
-//         total++;
-//     }
-
-//     return total;
-
-// }
