@@ -247,13 +247,13 @@ class Program
                                 Console.WriteLine($"[Fetch] Group '{group}' on '{topic}-{partitionId}' is @ {storedOffset}");
                                 break;
                             }
-                            case 5:
+                        case 5:
                             {
                                 // --------------------------- BATCH PRODUCE ---------------------------
                                 // Protocol: |5|len|topic|4|batchsize|len_msg1|msg1|len_msg2|mesg2|...
                                 // --------------------------------------------------------------------
 
-                                 // 1. Read Topic
+                                // 1. Read Topic
                                 byte[] topicLenBuf = new byte[2];
                                 await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
                                 short topicLen = BitConverter.ToInt16(topicLenBuf);
@@ -272,9 +272,9 @@ class Program
 
                                 List<byte[]> cache = new List<byte[]>();
 
-                                for (int i=0; i< msgCount; i++)
+                                for (int i = 0; i < msgCount; i++)
                                 {
-                                        // 3. Read Payload Size
+                                    // 3. Read Payload Size
                                     byte[] sizeBuf = new byte[4];
                                     await stream.ReadExactlyAsync(sizeBuf, 0, 4);
                                     int size = BitConverter.ToInt32(sizeBuf);
@@ -289,6 +289,14 @@ class Program
                                 await partition.AppendBatchAsync(cache);
 
                                 Console.WriteLine($"[BatchProduce] Saved {msgCount} messages to '{topicName}'");
+
+                                break;
+                            }
+                            case 6:
+                            {
+                                // --------------------------- BATCH READ ---------------------------
+                                // Protocol: |6|len|topic|4|partId|4|batchsize|len_msg1|msg1|len_msg2|mesg2|...
+                                // --------------------------------------------------------------------
 
                                 break;
                             }
