@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("KafkaClone.Playground")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+88ce9a4d3e90986a1384570ccad49144d7662d9d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3ac73598d6660e9b755f81d64164db540765851f")]
 [assembly: System.Reflection.AssemblyProductAttribute("KafkaClone.Playground")]
 [assembly: System.Reflection.AssemblyTitleAttribute("KafkaClone.Playground")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

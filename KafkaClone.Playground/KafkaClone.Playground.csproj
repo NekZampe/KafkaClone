@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KafkaClone.Storage\KafkaClone.Storage.csproj" />
+    <ProjectReference Include="..\KafkaClone.Shared\KafkaClone.Shared.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

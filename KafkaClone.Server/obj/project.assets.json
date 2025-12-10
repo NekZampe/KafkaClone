@@ -324,6 +324,16 @@
           "buildTransitive/net8.0/System.Text.Json.targets": {}
         }
       },
+      "KafkaClone.Shared/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/KafkaClone.Shared.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/KafkaClone.Shared.dll": {}
+        }
+      },
       "KafkaClone.Storage/1.0.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v9.0",
@@ -931,6 +941,11 @@
         "useSharedDesignerContext.txt"
       ]
     },
+    "KafkaClone.Shared/1.0.0": {
+      "type": "project",
+      "path": "../KafkaClone.Shared/KafkaClone.Shared.csproj",
+      "msbuildProject": "../KafkaClone.Shared/KafkaClone.Shared.csproj"
+    },
     "KafkaClone.Storage/1.0.0": {
       "type": "project",
       "path": "../KafkaClone.Storage/KafkaClone.Storage.csproj",
@@ -939,6 +954,7 @@
   },
   "projectFileDependencyGroups": {
     "net9.0": [
+      "KafkaClone.Shared >= 1.0.0",
       "KafkaClone.Storage >= 1.0.0"
     ]
   },
@@ -967,6 +983,9 @@
         "net9.0": {
           "targetAlias": "net9.0",
           "projectReferences": {
+            "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj": {
+              "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj"
+            },
             "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/KafkaClone.Storage.csproj": {
               "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/KafkaClone.Storage.csproj"
             }

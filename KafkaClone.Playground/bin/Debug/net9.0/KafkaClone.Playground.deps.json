@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v9.0": {
       "KafkaClone.Playground/1.0.0": {
         "dependencies": {
+          "KafkaClone.Shared": "1.0.0",
           "KafkaClone.Storage": "1.0.0"
         },
         "runtime": {
@@ -212,6 +213,14 @@
           }
         }
       },
+      "KafkaClone.Shared/1.0.0": {
+        "runtime": {
+          "KafkaClone.Shared.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "KafkaClone.Storage/1.0.0": {
         "dependencies": {
           "Microsoft.Extensions.Logging": "10.0.0",
@@ -343,6 +352,11 @@
       "sha512": "sha512-1Dpjwq9peG/Wt5BNbrzIhTpclfOSqBWZsUO28vVr59yQlkvL5jLBWfpfzRmJ1OY+6DciaY0DUcltyzs4fuZHjw==",
       "path": "system.text.json/10.0.0",
       "hashPath": "system.text.json.10.0.0.nupkg.sha512"
+    },
+    "KafkaClone.Shared/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
     },
     "KafkaClone.Storage/1.0.0": {
       "type": "project",

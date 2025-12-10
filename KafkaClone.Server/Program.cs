@@ -295,8 +295,61 @@ class Program
                             case 6:
                             {
                                 // --------------------------- BATCH READ ---------------------------
-                                // Protocol: |6|len|topic|4|partId|4|batchsize|len_msg1|msg1|len_msg2|mesg2|...
+                                // receive: |6|len(2)|topic|partId(4)|offset(8)|batchsize(4)|
+                                // return: |nextOffset||batchsize|len_msg1|msg1|len_msg2|mesg2|...
                                 // --------------------------------------------------------------------
+                                // 1. Read Topic
+                                byte[] topicLenBuf = new byte[2];
+                                await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
+                                short topicLen = BitConverter.ToInt16(topicLenBuf);
+
+                                byte[] topicBuf = new byte[topicLen];
+                                await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
+                                string topicName = Encoding.UTF8.GetString(topicBuf);
+
+                                // 2. Read Partition ID
+                                byte[] partIdBuf = new byte[4];
+                                await stream.ReadExactlyAsync(partIdBuf, 0, 4);
+                                int partitionId = BitConverter.ToInt32(partIdBuf);
+
+                                // 3. Get Specific Partition
+                                Partition partition = topicManager.GetTopic(topicName, partitionId);
+
+                                // 4. get starting offset
+                                byte[] offsetBytes = new byte[8];
+                                await stream.ReadExactlyAsync(offsetBytes,0,8);
+                                long offset = BitConverter.ToInt64(offsetBytes);
+
+                                // 5. Get batch request size
+                                byte[] msgCountBuf = new byte[4];
+                                await stream.ReadExactlyAsync(msgCountBuf, 0, 4);
+                                int msgCount = BitConverter.ToInt32(msgCountBuf);
+
+
+                                // 6. Get all messages
+                                (List<byte[]> messages, long nextOffset) = await partition.ReadBatchAsync(offset,msgCount);
+
+                                byte[] nextOffsetBytes = BitConverter.GetBytes(nextOffset);
+
+                                // 7. Return: |lastOffset|msgCount|len_msg1|msg1|len_msg2|mesg2|...
+
+                                byte[] returnMsgsCount = BitConverter.GetBytes(messages.Count());
+
+                                var bufferedStream = new BufferedStream(stream, 8192); // 8KB buffer
+
+
+                                await bufferedStream.WriteAsync(nextOffsetBytes);
+                                await bufferedStream.WriteAsync(returnMsgsCount);
+                                
+                                foreach(var msg in messages)
+                                {
+                                    byte[] msgLength = BitConverter.GetBytes(msg.Length);
+
+                                    await bufferedStream.WriteAsync(msgLength);
+                                    await bufferedStream.WriteAsync(msg);
+                                }
+
+                                await bufferedStream.FlushAsync();
 
                                 break;
                             }

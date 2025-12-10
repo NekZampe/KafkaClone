@@ -289,7 +289,7 @@ public class Partition : IDisposable
 
 
 
-    public async Task<List<byte[]>> ReadBatchAsync(long offset, int maxCount)
+    public async Task<(List<byte[]> Messages, long NextOffset)> ReadBatchAsync(long offset,int maxCount)
     {
         // Finds .log file closest to index ( smaller than )
         var validKeys = _offsets.Keys.Where(k => k <= offset);
@@ -345,7 +345,7 @@ public class Partition : IDisposable
                             if (!validKeys.Any())
                             {
                                 //No more index to read, return what we have
-                                return readResults;
+                                return (readResults, offset + readResults.Count);
                             }
 
                             baseOffset = validKeys.Last();
@@ -365,6 +365,10 @@ public class Partition : IDisposable
 
                         }
 
+                        // Safety Check
+                        if (currentIndexPosition >= tempIndex.Length)
+                            throw new IndexOutOfRangeException("Message not found");
+
                         tempIndex.Position = currentIndexPosition;
 
                         byte[] indexBuffer = new byte[8];
@@ -373,9 +377,22 @@ public class Partition : IDisposable
 
                         tempLog.Position = logPosition;
 
+
                         // Read Length
                         byte[] lengthBuffer = new byte[4];
-                        await tempLog.ReadExactlyAsync(lengthBuffer);
+
+                        try{
+
+                         await tempLog.ReadExactlyAsync(lengthBuffer);
+
+                        } catch (EndOfStreamException) 
+                        {
+                            _logger.LogWarning("[BatchReadAsync] EndOfStreamException - Returning partial result.");
+                            
+                            // Stop everything and return what we have
+                            return (readResults, offset + readResults.Count);
+                        }
+
                         int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
 
                         // Read Payload
@@ -389,7 +406,7 @@ public class Partition : IDisposable
 
             }
         }
-        return readResults;
+        return (readResults, offset + readResults.Count);
     }
 
     // Remove old logs

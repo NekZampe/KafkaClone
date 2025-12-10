@@ -6,3 +6,9 @@ dotnet run --project KafkaClone.Server
 
 #Run Playground
 dotnet run --project KafkaClone.Playground
+
+dotnet new classlib -o KafkaClone.Shared
+dotnet sln add KafkaClone.Shared/KafkaClone.Shared.csproj
+
+dotnet add KafkaClone.Server/KafkaClone.Server.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj
+dotnet add KafkaClone.Playground/KafkaClone.Playground.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj

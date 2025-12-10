@@ -25,7 +25,7 @@ Console.WriteLine("  Type '2 <topic> <partitionId> <offset>'  to CONSUME (e.g., 
 Console.WriteLine("  Type '3 <group> <topic> <partitionId> <offset>'  to COMMIT (e.g., '3 groupA payments 0 34')"); //Commit groups offset
 Console.WriteLine("  Type '4 <group> <topic> <partitionId>'  to FETCH (e.g., '4 groupA payments 0')"); //Retrieves groups offset
 Console.WriteLine("  Type '5 <topic> <message1>,<message2>...' to BATCH PRODUCE (e.g., '5 payments +344$ -22$ +3758$')");
-Console.WriteLine("  Type '6 <topic> <offset> <NumberOfMessages>' to BATCH CONSUME (e.g., '6 payments 5 100')"); // Starting at offset 5, read the next 100 messages
+Console.WriteLine("  Type '6 <topic> <partitionId> <offset> <NumberOfMessages>' to BATCH CONSUME (e.g., '6 payments 2 100')"); // Starting at offset 5, read the next 100 messages
 Console.WriteLine("  Type 'test <topic> <NumberOfMessages>' to Run Load Test (e.g., 'test payments 100')");
 
 // MAIN LOOP
@@ -136,6 +136,28 @@ while (true)
 
                 break;
             }
+
+
+        case "6": // Batch Consume: 6 <topic> <partitionId> <offset> <numberOfMessages>
+            {
+                if (parts.Length < 5)
+                {
+                    Console.WriteLine("Usage:6 <topic> <partitionId> <offset> <numberOfMessages>");
+                    break;
+                }
+                if (int.TryParse(parts[2], out int partitionId) && long.TryParse(parts[3], out long consumeOffset) && int.TryParse(parts[4], out int msgCount))
+                {
+                    if (partitionId < 0) partitionId = -1;
+                    long result = await ConsumeBatchAsync(stream, parts[1], partitionId, consumeOffset, msgCount);
+                    Console.WriteLine($"Next Offset: {result}");
+                }
+                else
+                {
+                    Console.WriteLine("Invalid offset.");
+                }
+                break;
+            }
+
         case "test":
             if (parts.Length < 3)
             {
@@ -396,42 +418,48 @@ static async Task<long> ConsumeBatchAsync(NetworkStream stream, string topic, in
     byte[] partIdBytes = BitConverter.GetBytes(partitionId);
     await stream.WriteAsync(partIdBytes);
 
-    // 3. Send Offset (8 bytes)
+    // 3. Send Base Offset (8 bytes)
     byte[] offsetBytes = BitConverter.GetBytes(offset);
     await stream.WriteAsync(offsetBytes);
 
+    // 4. Send msgCount (4 Bytes)
+    byte[] msgCountBytes = BitConverter.GetBytes(maxCount);
+    await stream.WriteAsync(msgCountBytes);
+
+    //-------------------------------------------- RESPONSE ----------------------------
+    
     // 2.1 Read nextOffset
     byte[] nextOffsetBuffer = new byte[8];
 
-    try
-    {
-        await stream.ReadExactlyAsync(nextOffsetBuffer, 0, 8);
+    await stream.ReadExactlyAsync(nextOffsetBuffer, 0, 8);
 
-    }
-    catch (EndOfStreamException)
-    {
-        Console.WriteLine("End of Log (Server disconnected).");
-        return -1;
-    }
     long nextOffset = BitConverter.ToInt64(nextOffsetBuffer, 0);
 
-    if (nextOffset == -1)
+    // 3. Read BatchResponse Count (4 bytes)
+    byte[] countBuffer = new byte[4];
+    await stream.ReadExactlyAsync(countBuffer, 0, 4);
+    int count = BitConverter.ToInt32(countBuffer, 0);
+
+    List<string> messages = new List<string>(count);
+
+    for(int i = 0; i < count; i++)
     {
-        Console.WriteLine("End of Log.");
-        return -1;
+        byte[] sizeBuffer = new byte[4];
+        await stream.ReadExactlyAsync(sizeBuffer, 0, 4);
+        int size = BitConverter.ToInt32(sizeBuffer, 0);
+
+        // 4. Read Response Payload
+        byte[] payload = new byte[size];
+        await stream.ReadExactlyAsync(payload, 0, size);
+        string message = Encoding.UTF8.GetString(payload);
+
+        messages.Add(message);
     }
 
-    // 3. Read Response Size (4 bytes)
-    byte[] sizeBuffer = new byte[4];
-    await stream.ReadExactlyAsync(sizeBuffer, 0, 4);
-    int size = BitConverter.ToInt32(sizeBuffer, 0);
-
-    // 4. Read Response Payload
-    byte[] payload = new byte[size];
-    await stream.ReadExactlyAsync(payload, 0, size);
-
-    // 5. Print it!
-    string message = Encoding.UTF8.GetString(payload);
-    Console.WriteLine($"Received from offset {offset}: {message}");
+    foreach( var msg in messages)
+    {
+        Console.WriteLine($"Received {msg}");
+    }
+    
     return nextOffset;
 }

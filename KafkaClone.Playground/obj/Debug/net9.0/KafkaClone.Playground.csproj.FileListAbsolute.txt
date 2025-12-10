@@ -72,3 +72,5 @@ C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Playground/bin/Debug/net9.0/Sys
 C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Playground/bin/Debug/net9.0/runtimes/browser/lib/net8.0/System.Text.Encodings.Web.dll
 C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Playground/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Text.Encodings.Web.dll
 C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Playground/obj/Debug/net9.0/KafkaClone.Playground.sourcelink.json
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Playground/bin/Debug/net9.0/KafkaClone.Shared.dll
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Playground/bin/Debug/net9.0/KafkaClone.Shared.pdb
