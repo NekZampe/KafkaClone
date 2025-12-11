@@ -1,6 +1,6 @@
 -----
 
-# 🚀 KafkaClone: A High-Performance Distributed Streaming Platform in C\#
+# KafkaClone: A High-Performance Distributed Streaming Platform in C\#
 
 **KafkaClone** is a lightweight, educational implementation of a distributed event streaming platform, built from scratch in .NET 8. It replicates the core architecture of Apache Kafka, focusing on high-throughput sequential disk I/O, a custom binary protocol, and efficient networking.
 
