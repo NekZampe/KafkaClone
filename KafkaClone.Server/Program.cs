@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using KafkaClone.Shared;
 using KafkaClone.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
@@ -20,8 +21,20 @@ class Program
             builder.SetMinimumLevel(LogLevel.Information);
         });
 
+        ClusterController clusterController = new ClusterController();
+
+        Broker broker0 = new Broker(0,9092,"localhost");
+        Broker broker1 = new Broker(1,9093,"localhost");
+        Broker broker2 = new Broker(2,9094,"localhost");
+
+        List<Broker> brokers = new List<Broker>{broker0,broker1,broker2};
+
+        clusterController.RegisterBroker(broker0);
+        clusterController.RegisterBroker(broker1);
+        clusterController.RegisterBroker(broker2);
+
         // 2. Initialize Managers
-        TopicManager topicManager = new TopicManager(basePath, loggerFactory);
+        TopicManager topicManager = await TopicManager.InitializeAsync(basePath, loggerFactory);
         OffsetManager offsetManager = new OffsetManager(basePath);
 
         // 3. Start the Server
@@ -36,11 +49,11 @@ class Program
             Console.WriteLine("Client connected!");
 
             // Fire and forget (don't await the task itself so we can accept the next client)
-            _ = HandleClientAsync(client, topicManager, offsetManager);
+            _ = HandleClientAsync(client, topicManager, offsetManager,clusterController,brokers);
         }
     }
 
-    static async Task HandleClientAsync(TcpClient client, TopicManager topicManager, OffsetManager offsetManager)
+    static async Task HandleClientAsync(TcpClient client, TopicManager topicManager, OffsetManager offsetManager, ClusterController clusterController,List<Broker> brokers)
     {
         // "using" ensures the client is closed when this method finishes
         using (client)
@@ -67,7 +80,7 @@ class Program
                         case 0:
                             {
                                 // ----------- CREATE TOPIC (NEW) ----------
-                                // Protocol: |0|len|topic|4|partitionCount|
+                                // Protocol: |0|len|topic|4|partitionCount|TimeSpan|
                                 // -----------------------------------------
 
                                 // 1. Read Topic
@@ -84,8 +97,10 @@ class Program
                                 await stream.ReadExactlyAsync(countBuf, 0, 4);
                                 int count = BitConverter.ToInt32(countBuf);
 
-                                // 3. Execute
-                                topicManager.CreateTopic(topicName, count);
+                                TimeSpan timeSpan = TimeSpan.FromMinutes(5);
+
+                                // 3. Execute NEEED TO UPDATE
+                                await topicManager.CreateTopic(topicName, count,true,1024,timeSpan,brokers);
 
                                 // 4. Send Ack (1 = Success)
                                 await stream.WriteAsync(new byte[] { 1 });
@@ -350,6 +365,22 @@ class Program
                                 }
 
                                 await bufferedStream.FlushAsync();
+
+                                break;
+                            }
+                            case 7:
+                            {
+                                // --------------------------- GET METADATA ---------------------------
+                                // receive: |7|
+                                // return: |count|len1|SerializedBroker1|len2|SerializedBroker2|...
+                                // --------------------------------------------------------------------
+                                
+                                (byte[] bytes, int count) =  await clusterController.GetAllBrokers();
+
+                                byte[] countBytes = BitConverter.GetBytes(count);
+
+                                await stream.WriteAsync(countBytes);
+                                await stream.WriteAsync(bytes);
 
                                 break;
                             }

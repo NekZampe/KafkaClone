@@ -6,10 +6,13 @@ namespace KafkaClone.Storage;
 
 public class Partition : IDisposable
 {
+
+    public int Id;
     private readonly string _directoryPath;
+    public int BrokerId { get; set; }
     private FileStream _fileStream;
     private FileStream _indexStream;
-    private readonly int _maxFileSize = 1024;
+    private readonly int _maxFileSize;
 
     private readonly System.TimeSpan _retentionMaxAge = TimeSpan.FromMinutes(5);
     private readonly bool _autoFlush = false; //debug mode
@@ -24,8 +27,10 @@ public class Partition : IDisposable
     private readonly ILogger<Partition> _logger;
 
 
-    public Partition(string directoryPath, bool autoFlush, ILogger<Partition> logger, TimeSpan timeSpan)
+    public Partition(int id,string directoryPath,int brokerId, bool autoFlush, ILogger<Partition> logger, TimeSpan timeSpan,int maxFileSize = 1024)
     {
+         Id = id;
+
         _logger = logger;
 
         _retentionMaxAge = timeSpan;
@@ -35,6 +40,10 @@ public class Partition : IDisposable
         _directoryPath = directoryPath;
 
         _offsets = new SortedDictionary<long, string>();
+
+        BrokerId = brokerId;
+
+        _maxFileSize = maxFileSize;
 
         // Ensure folder exists
         if (!Directory.Exists(_directoryPath))
@@ -470,8 +479,6 @@ public class Partition : IDisposable
         _fileStream.Position = lastKnownPosition;
 
     }
-
-
 
 
     public void Dispose()

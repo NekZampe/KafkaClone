@@ -4,6 +4,7 @@ using KafkaClone.Storage;
 using System.Net;
 using System.Net.Sockets;
 using System.Globalization;
+using KafkaClone.Shared;
 
 // 1. Connect to the server
 using TcpClient client = new TcpClient();
@@ -26,6 +27,7 @@ Console.WriteLine("  Type '3 <group> <topic> <partitionId> <offset>'  to COMMIT 
 Console.WriteLine("  Type '4 <group> <topic> <partitionId>'  to FETCH (e.g., '4 groupA payments 0')"); //Retrieves groups offset
 Console.WriteLine("  Type '5 <topic> <message1>,<message2>...' to BATCH PRODUCE (e.g., '5 payments +344$ -22$ +3758$')");
 Console.WriteLine("  Type '6 <topic> <partitionId> <offset> <NumberOfMessages>' to BATCH CONSUME (e.g., '6 payments 2 100')"); // Starting at offset 5, read the next 100 messages
+Console.WriteLine("  Type '7 <nothing>' Get Cluster Metadata");
 Console.WriteLine("  Type 'test <topic> <NumberOfMessages>' to Run Load Test (e.g., 'test payments 100')");
 
 // MAIN LOOP
@@ -155,6 +157,13 @@ while (true)
                 {
                     Console.WriteLine("Invalid offset.");
                 }
+                break;
+            }
+            case "7": // Get Cluster Metadata: 7 <nothing>
+            {
+
+                await GetClusterMetadata(stream);
+
                 break;
             }
 
@@ -462,4 +471,28 @@ static async Task<long> ConsumeBatchAsync(NetworkStream stream, string topic, in
     }
     
     return nextOffset;
+}
+
+
+
+static async Task GetClusterMetadata(NetworkStream stream)
+{
+    // Send
+     await stream.WriteAsync(new byte[] { 7 });
+
+    // Receive: |count|array of broker...
+    byte[] countBytes = new byte[4];
+    await stream.ReadExactlyAsync(countBytes,0,4);
+
+    int count = BitConverter.ToInt32(countBytes);
+
+    Console.WriteLine($"Server reports {count} brokers...");
+
+
+    for(int i = 0; i < count; i++)
+    {
+        Broker broker = await Broker.DeserializeAsync(stream);
+        Console.WriteLine(broker.ToString());
+    }
+
 }

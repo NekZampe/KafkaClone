@@ -4,6 +4,8 @@ using System.IO;
 using System.Text;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
+using KafkaClone.Shared;
+using System.Threading.Tasks;
 
 namespace KafkaClone.Storage;
 
@@ -19,22 +21,48 @@ public class TopicManager
 
     private Dictionary<string, int> _roundRobinCounters;
 
-    private int _defaultPartitions;
+    private Dictionary<string,TopicState> _topicStates;
 
-    public TopicManager(string basePath, ILoggerFactory loggerFactory, int defaultPartitions = 1)
+    private int _defaultPartitions = 1;
+
+    private TopicManager(string basePath, ILoggerFactory loggerFactory, int defaultPartitions)
     {
         _basePath = basePath;
         _loggerFactory = loggerFactory;
         _topics = new Dictionary<string, List<Partition>>();
         _roundRobinCounters = new Dictionary<string, int>();
+        _topicStates = new Dictionary<string, TopicState>();
         _defaultPartitions = defaultPartitions;
+
     }
-    public void CreateTopic(string topic, int partitionCount)
+
+
+    public static async Task<TopicManager> InitializeAsync(string basePath, ILoggerFactory loggerFactory, int defaultPartitions = 1)
+    {
+
+        TopicManager topicManager = new TopicManager(basePath,loggerFactory,defaultPartitions);
+
+        await topicManager.LoadTopics();
+
+        return topicManager;
+        
+    }
+
+
+
+
+    public async Task CreateTopic(string topic, int partitionCount,bool autoFlush,int maxFileSize, TimeSpan timeSpan, List<Broker> brokers)
     {
         // 1. Safety Check: Don't overwrite existing topics
         if (_topics.ContainsKey(topic) || Directory.Exists(Path.Combine(_basePath, topic)))
         {
             Console.WriteLine($"Topic '{topic}' already exists. Skipping creation.");
+            return;
+        }
+
+        if (brokers.Count < 1)
+        {
+            Console.WriteLine("Broker list is empty");
             return;
         }
 
@@ -44,19 +72,45 @@ public class TopicManager
         ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
         List<Partition> newPartitions = new List<Partition>();
 
-        // 3. Create the specific number of partitions requested
+        int brokerCount = brokers.Count;
+
+        TopicData tpd = new TopicData
+            {
+                TopicName = topic,
+                AutoFlush = autoFlush,
+                MaxFileSize = maxFileSize,
+                TimeSpan = timeSpan
+            };
+
+        // 3. Create the specific number of partitions requested, save the state
         for (int i = 0; i < partitionCount; i++)
         {
             string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
 
-            // Logic reused from your existing code
-            Partition newPartition = new Partition(newFolder, true, partitionLogger, TimeSpan.FromSeconds(20));
+            int brokerId = brokers[i % brokerCount].Id;
+
+            Partition newPartition = new Partition(i,newFolder,brokerId, autoFlush, partitionLogger, timeSpan, maxFileSize);
             newPartitions.Add(newPartition);
+
+            PartitionMetadata ptmtd = new PartitionMetadata()
+            {
+                PartitionId = i,
+                BrokerId = brokerId,
+            };
+
+            tpd.PartitionMetadata.Add(ptmtd);
+
         }
 
+        string newPath = Path.Combine(_basePath,topic);
+
+        TopicState ts = await TopicState.CreateAsync(newPath,tpd);
+
         // 4. Register it in memory
+        _topicStates[topic] = ts;
         _topics[topic] = newPartitions;
         _roundRobinCounters[topic] = 0;
+
 
         Console.WriteLine($"Created topic '{topic}' with {partitionCount} partitions.");
     }
@@ -70,41 +124,43 @@ public class TopicManager
         if (_topics.TryGetValue(topic, out var partitions))
         {
             if (index < 0)
-                return RoundRobin(topic, partitions);
+                return RoundRobinPartition(topic, partitions);
 
-            if (index <= partitions.Count() - 1)
+            if (index <= partitions.Count - 1)
                 return partitions[index];
         }
 
-        // Partition doesn't exist so create it
-        // First verify base path exists
-        if (!Directory.Exists(_basePath))
-        {
-            Directory.CreateDirectory(_basePath);
-        }
+        return null;
 
-        ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+        // // Partition doesn't exist so create it
+        // // First verify base path exists
+        // if (!Directory.Exists(_basePath))
+        // {
+        //     Directory.CreateDirectory(_basePath);
+        // }
 
-        List<Partition> newPartitions = new List<Partition>();
+        // ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+
+        // List<Partition> newPartitions = new List<Partition>();
 
 
-        for (int i = 0; i < _defaultPartitions; i++)
-        {
-            string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
-            Partition newPartition = new Partition(newFolder, true, partitionLogger, TimeSpan.FromSeconds(20));
-            newPartitions.Add(newPartition);
-        }
+        // for (int i = 0; i < _defaultPartitions; i++)
+        // {
+        //     string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
+        //     Partition newPartition = new Partition(i,newFolder, true, partitionLogger, TimeSpan.FromSeconds(20));
+        //     newPartitions.Add(newPartition);
+        // }
 
-        _topics[topic] = newPartitions;
-        _roundRobinCounters[topic] = 0;
+        // _topics[topic] = newPartitions;
+        // _roundRobinCounters[topic] = 0;
 
-        if (index <= newPartitions.Count() - 1 && index > -1)
-            return newPartitions[index];
+        // if (index <= newPartitions.Count() - 1 && index > -1)
+        //     return newPartitions[index];
 
-        return RoundRobin(topic, newPartitions);
+        // return RoundRobinPartition(topic, newPartitions);
     }
 
-    private Partition RoundRobin(string topic, List<Partition> partitions)
+    private Partition RoundRobinPartition(string topic, List<Partition> partitions)
     {
 
         if (partitions.Count() == 1) return partitions[0];
@@ -117,4 +173,66 @@ public class TopicManager
 
         return partitions[next];
     }
-}
+
+
+    private async Task LoadTopics()
+    {
+
+        if (!Directory.Exists(_basePath)) Directory.CreateDirectory(_basePath);
+
+        string[] drs = Directory.GetDirectories(_basePath);
+        List<string> paths = new List<string>(drs.Length);
+
+        foreach(var dr in drs)
+        {
+            paths.Add(Path.GetFileName(dr));
+        }
+
+        foreach( var topic in paths )
+        {
+            
+            string topicPath = Path.Combine(_basePath,topic);
+            string statePath = Path.Combine(topicPath,"state.json");
+
+            if(!File.Exists(statePath))
+                throw new FileNotFoundException($"Cannot find `state.json` file for {topic}");
+
+            TopicState ts = await TopicState.LoadAsync(topicPath);
+
+            if (ts is null) continue;
+
+            List<Partition> newPartitions = new List<Partition>();
+
+            _topicStates[topic] = ts;
+
+            foreach(var pmtda in ts.TopicData.PartitionMetadata ){
+
+            ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+
+            int partitionId = pmtda.PartitionId;
+            int brokerId = pmtda.BrokerId;
+            bool autoFlush = ts.TopicData.AutoFlush;
+            TimeSpan timeSpan = ts.TopicData.TimeSpan;
+            int maxFileSize = ts.TopicData.MaxFileSize;
+
+
+            string partitionPath = Path.Combine(topicPath,$"{topic}-{partitionId}");
+
+            Partition newPartition = new Partition(partitionId,partitionPath,brokerId, autoFlush, partitionLogger, timeSpan, maxFileSize);
+            newPartitions.Add(newPartition);
+
+            }
+
+            _topics[topic] = newPartitions;
+
+            }
+
+
+        }
+
+
+        
+    }
+
+
+

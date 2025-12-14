@@ -150,7 +150,11 @@
         "frameworks": {
           "net9.0": {
             "targetAlias": "net9.0",
-            "projectReferences": {}
+            "projectReferences": {
+              "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj": {
+                "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj"
+              }
+            }
           }
         },
         "warningProperties": {

@@ -24,3 +24,6 @@ C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/ref/Ka
 /home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClone.Storage.csproj.AssemblyReference.cache
 C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClone.Storage.csproj.AssemblyReference.cache
 C:/Users/Nektarios/Desktop/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClone.Storage.sourcelink.json
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/bin/Debug/net9.0/KafkaClone.Shared.dll
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/bin/Debug/net9.0/KafkaClone.Shared.pdb
+/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/obj/Debug/net9.0/KafkaClo.47D87046.Up2Date

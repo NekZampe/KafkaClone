@@ -84,7 +84,10 @@ public class Broker
     }
 
 
-
+    public override string ToString()
+    {
+        return $"Broker {Id} at {Host}:{Port}";
+    }
 
 
 

@@ -12,3 +12,6 @@ dotnet sln add KafkaClone.Shared/KafkaClone.Shared.csproj
 
 dotnet add KafkaClone.Server/KafkaClone.Server.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj
 dotnet add KafkaClone.Playground/KafkaClone.Playground.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj
+
+
+dotnet add KafkaClone.Storage/KafkaClone.Storage.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj
