@@ -485,5 +485,7 @@ $RECYCLE.BIN/
 
 # Mine added
 kafka-data/*
-bin/
-obj/
+# Ignore all bin/ directories everywhere
+[Bb]in/
+# Ignore all obj/ directories everywhere
+[Oo]bj/

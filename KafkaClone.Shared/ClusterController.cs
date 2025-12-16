@@ -14,8 +14,6 @@ public class ClusterController
 
     public int brokersCount =>_brokers.Count;
 
-
-
     public ClusterController()
     {
         _brokers = new Dictionary<int, Broker>();

@@ -16,7 +16,6 @@ public class Broker
 
     public string Host { get; set; }
 
-
     public Broker(int id,int port,string host)
     {
         Id = id;
@@ -83,14 +82,9 @@ public class Broker
         return new Broker(id,port,host);
     }
 
-
     public override string ToString()
     {
         return $"Broker {Id} at {Host}:{Port}";
     }
-
-
-
-
 
 }
