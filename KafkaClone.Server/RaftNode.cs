@@ -55,6 +55,8 @@ public class RaftNode
 
     private Dictionary<int,long> _matchIndex;
 
+    public long LeaderCommit = 0;
+
     private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog)
     {
         _basePath = basePath;

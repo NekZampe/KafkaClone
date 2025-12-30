@@ -10,10 +10,10 @@ public class AppendEntriesRequest
     public long PrevLogIndex { get; set; }
     public int PrevLogTerm { get; set; } 
 
-   // 3. The Payload: The actual log entries to store
-    public List<LogEntry> Entries { get; set; } 
-
-    // 4. Execution:
+    // 3. Execution:
     public long LeaderCommit { get; set; }
+
+   // 4. The Payload: The actual log entries to store
+    public List<LogEntry> Entries { get; set; } 
 
 }

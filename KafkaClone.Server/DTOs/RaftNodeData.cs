@@ -14,5 +14,7 @@ namespace KafkaClone.Server.DTOs
         public int? VotedFor {get;set;}
         public long LastIndex;
         public int LastTerm;
+
+        public long LeaderCommit {get;set;}
     }
 }

@@ -1,0 +1,63 @@
+using Grpc.Net.Client;
+using KafkaClone.Server;
+using KafkaClone.Shared;
+using KafkaClone.Shared.Grpc;
+
+
+public class GrpcRaftTransport : IRaftTransport
+{
+    // Holds the active gRPC clients for each broker
+    private readonly Dictionary<int, RaftService.RaftServiceClient> _clients = new();
+    
+    // We keep the channels so we can dispose of them properly later
+    private readonly List<GrpcChannel> _channels = new();
+
+    public GrpcRaftTransport(List<Broker> clusterMembers)
+    {
+        foreach (var member in clusterMembers)
+        {
+
+            var address = $"http://{member.Host}:{member.Port.ToString()}";
+            // 1. Create a channel to the broker's address (e.g., "http://192.168.1.10:5000")
+            var channel = GrpcChannel.ForAddress(address);
+            
+            // 2. Create the specialized Raft client (the "stub")
+            var client = new RaftService.RaftServiceClient(channel);
+            
+            _channels.Add(channel);
+            _clients[member.Id] = client;
+        }
+    }
+
+public async Task<RequestVoteResponse> SendRequestVoteRequest(KafkaClone.Server.RequestVoteRequest request, Broker broker)
+{
+    try
+    {
+        // 1. Get the stub for this specific broker
+        var client = _clients[broker.Id];
+
+        // 2. Map internal DTO to Protobuf message
+        var protoRequest = RaftMapper.ToProto(request);
+
+        // 3. Perform the gRPC call with a timeout (optional but recommended)
+        var protoResponse = await client.RequestVoteAsync(protoRequest);
+
+        // 4. Map back to our internal response type
+        return RaftMapper.ToInternal(protoResponse);
+    }
+    catch (Exception ex)
+    {
+        // If the broker is offline, we return a response where vote is NOT granted
+        // and the term is -1 (or the request term) to signify a failure.
+        return new RequestVoteResponse 
+        { 
+            Verdict = false, 
+            Term = request.Term 
+        };
+    }
+}
+
+
+
+
+}

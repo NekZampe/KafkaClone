@@ -83,6 +83,7 @@ namespace KafkaClone.Server.DTOs
     public class LogEntry
     {
         public int Term { get; set; }
+        public long Index {get;set;}
         public IClusterCommand Command { get; set; } 
     }
 

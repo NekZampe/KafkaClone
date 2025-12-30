@@ -1,9 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "hKRbrwOIHH8=",
+  "dgSpecHash": "GLoAv5Ni5YQ=",
   "success": true,
   "projectFilePath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Server/KafkaClone.Server.csproj",
   "expectedPackageFiles": [
+    "/home/nektarios/.nuget/packages/google.protobuf/3.33.2/google.protobuf.3.33.2.nupkg.sha512",
+    "/home/nektarios/.nuget/packages/grpc.core.api/2.76.0/grpc.core.api.2.76.0.nupkg.sha512",
+    "/home/nektarios/.nuget/packages/grpc.net.client/2.76.0/grpc.net.client.2.76.0.nupkg.sha512",
+    "/home/nektarios/.nuget/packages/grpc.net.common/2.76.0/grpc.net.common.2.76.0.nupkg.sha512",
     "/home/nektarios/.nuget/packages/microsoft.extensions.configuration/10.0.0/microsoft.extensions.configuration.10.0.0.nupkg.sha512",
     "/home/nektarios/.nuget/packages/microsoft.extensions.configuration.abstractions/10.0.0/microsoft.extensions.configuration.abstractions.10.0.0.nupkg.sha512",
     "/home/nektarios/.nuget/packages/microsoft.extensions.configuration.binder/10.0.0/microsoft.extensions.configuration.binder.10.0.0.nupkg.sha512",
