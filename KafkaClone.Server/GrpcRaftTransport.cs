@@ -1,5 +1,6 @@
 using Grpc.Net.Client;
 using KafkaClone.Server;
+using KafkaClone.Server.DTOs;
 using KafkaClone.Shared;
 using KafkaClone.Shared.Grpc;
 
@@ -29,7 +30,7 @@ public class GrpcRaftTransport : IRaftTransport
         }
     }
 
-public async Task<RequestVoteResponse> SendRequestVoteRequest(KafkaClone.Server.RequestVoteRequest request, Broker broker)
+public async Task<RequestVoteResponse> SendRequestVoteRequest(RequestVoteRequest request, Broker broker)
 {
     try
     {
@@ -52,10 +53,43 @@ public async Task<RequestVoteResponse> SendRequestVoteRequest(KafkaClone.Server.
         return new RequestVoteResponse 
         { 
             Verdict = false, 
-            Term = request.Term 
+            CurrentTerm = request.ElectionTerm
         };
     }
 }
+
+public async Task<AppendEntriesResponse> SendAppendEntriesRequest(AppendEntriesRequest request, Broker broker)
+    {
+
+
+        try
+        {
+
+
+        // 1. Get the stub for this specific broker
+        var client = _clients[broker.Id];
+
+        // 2. Map internal DTO to Protobuf message
+        var protoRequest = RaftMapper.ToProto(request);
+
+        // 3. Perform the gRPC call with a timeout (optional but recommended)
+        var protoResponse = await client.AppendEntriesAsync(protoRequest);
+
+        // 4. Map back to our internal response type
+        return RaftMapper.ToInternal(protoResponse);
+
+            
+        } catch (Exception ex)
+        {
+            return new AppendEntriesResponse
+            {
+                Success = false,
+                Term = request.Term,
+                LastLogIndex = request.PrevLogIndex
+            };
+        }
+        
+    }
 
 
 

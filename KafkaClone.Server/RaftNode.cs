@@ -267,9 +267,23 @@ public class RaftNode
 
     private async Task SendHeartbeats()
     {
+
         foreach(var member in _clusterMembers)
         {
+            var offset = _nextIndex[member.Id]-1;
+            if ( offset < 0) offset = 0;
+
+            var heartbeat =  new AppendEntriesRequest
+        {
+            Term = CurrentTerm,
+            LeaderId = _myIdentity.Id,
+            PrevLogIndex = offset,
+            PrevLogTerm = await GetTermByOffset(offset),
+            LeaderCommit = LastLogIndex,
+            Entries = new List<LogEntry>()
             
+        };
+            await _raftTransport.SendAppendEntriesRequest(heartbeat,member);
         }
     }
 
@@ -322,12 +336,6 @@ public class RaftNode
                 CurrentTerm = CurrentTerm
 
             };
-    }
-
-
-    public async Task AppendEntries(AppendEntriesRequest request)
-    {
-        
     }
 
     public async Task<AppendEntriesResponse> HandleAppendEntries(AppendEntriesRequest request)
@@ -434,6 +442,27 @@ public class RaftNode
 
         return logEntry.Term;
         
+    }
+
+    private async Task<int> GetTermByOffset(long offset)
+    {
+        // Raft convention: the term at the very beginning of time is 0
+        if (offset <= 0) 
+        {
+            return 0; 
+        }
+
+        try 
+        {
+            byte[] logBytes = await _raftLog.ReadAsync(offset);
+            LogEntry log = DeserializeLogEntry(logBytes);
+            return log.Term;
+        }
+        catch (Exception)
+        {
+            // If the log is shorter than we thought, we treat it as term 0
+            return 0;
+        }
     }
 
 
