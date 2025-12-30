@@ -12,6 +12,7 @@ namespace KafkaClone.Server.DTOs
         public NodeState NodeState {get;set;}
         public int CurrentTerm {get;set;}
         public int? VotedFor {get;set;}
-        public List<LogEntry> LogEntries {get;set;} = new List<LogEntry>();
+        public long LastIndex;
+        public int LastTerm;
     }
 }

@@ -6,9 +6,9 @@ namespace KafkaClone.Storage;
 
 public class Partition : IDisposable
 {
-
     public int Id;
     private readonly string _directoryPath;
+    private readonly ILoggerFactory _loggerFactory;
     public int BrokerId { get; set; }
     private FileStream _fileStream;
     private FileStream _indexStream;
@@ -25,6 +25,8 @@ public class Partition : IDisposable
     private long _activeBaseOffset;
 
     private readonly ILogger<Partition> _logger;
+
+    public long CurrentOffset => _activeBaseOffset + (IndexLength / 8 );
 
 
     public Partition(int id,string directoryPath,int brokerId, bool autoFlush, ILogger<Partition> logger, TimeSpan timeSpan,int maxFileSize = 1024)
@@ -77,10 +79,10 @@ public class Partition : IDisposable
             _offsets.Add(0, "00000");
         }
 
-        // STEP 2: Open that file (Reusing your old logic)
+        // STEP 2: Open that file (Reusing old logic)
         OpenSegment(latestFileName);
 
-        // Verify integrity ( check index matches with log)
+        // Verify integrity ( check index matches with log )
         RecoverIndex();
     }
 
@@ -480,11 +482,49 @@ public class Partition : IDisposable
 
     }
 
+        public async Task TruncateFromIndexAsync(long index)
+        {
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index));
+
+
+            long indexFileLength = _indexStream.Length;
+            long totalEntries = indexFileLength / 8;
+
+            // Nothing to truncate
+            if (index >= totalEntries)
+                return;
+
+            // 1. Read the log byte offset from the index file
+            long indexEntryOffset = index * 8;
+
+            byte[] buffer = new byte[8];
+
+            _indexStream.Seek(indexEntryOffset, SeekOrigin.Begin);
+            int read = await _indexStream.ReadAsync(buffer, 0, buffer.Length);
+
+            if (read != 8)
+                throw new IOException("Failed to read index entry");
+
+            long logByteOffset = BitConverter.ToInt64(buffer, 0);
+
+            // 2. Truncate the log file
+            if (logByteOffset < 0 || logByteOffset > _fileStream.Length)
+                throw new InvalidDataException("Corrupted index entry");
+
+            _fileStream.SetLength(logByteOffset);
+            await _fileStream.FlushAsync();
+
+            // 3. Truncate the index file
+            _indexStream.SetLength(indexEntryOffset);
+            await _indexStream.FlushAsync();
+        }
 
     public void Dispose()
     {
         _fileStream.Close();
         _indexStream.Close();
     }
+
 
 }

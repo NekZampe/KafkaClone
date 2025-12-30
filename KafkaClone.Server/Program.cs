@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using KafkaClone.Server;
 using KafkaClone.Shared;
 using KafkaClone.Storage;
 using Microsoft.Extensions.Logging;
@@ -32,6 +33,8 @@ class Program
         clusterController.RegisterBroker(broker0);
         clusterController.RegisterBroker(broker1);
         clusterController.RegisterBroker(broker2);
+
+        // RaftNode raftNode = await RaftNode.InitializeNode(basePath,broker0.Id,clusterMembers,);
 
         // 2. Initialize Managers
         TopicManager topicManager = await TopicManager.InitializeAsync(basePath, loggerFactory);

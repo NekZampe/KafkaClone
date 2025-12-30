@@ -1,6 +1,11 @@
 using System.Runtime.CompilerServices;
 using KafkaClone.Shared;
 using KafkaClone.Server.DTOs;
+using KafkaClone.Storage;
+using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.ComponentModel;
+using System.Threading.Tasks;
 
 namespace KafkaClone.Server;
 
@@ -13,12 +18,15 @@ public enum NodeState
 
 public class RaftNode
 {
+    private readonly string _basePath;
     private readonly Broker _myIdentity;
+
+    private readonly ILogger<Partition> _logger;
     
     // The current state (starts as Follower)
     public NodeState State { get; private set; } = NodeState.Follower;
 
-    // We need a list of peers to ask for votes!
+    // We need a list of peers to ask for votes
     private readonly List<Broker> _clusterMembers;
 
     public int? VotedFor { get; private set; }
@@ -37,45 +45,112 @@ public class RaftNode
 
     private IRaftTransport _raftTransport;
 
-    private long _lastIncludedIndex; // From the latest snapshot
-    private int _lastIncludedTerm;   // From the latest snapshot
+    private readonly Partition _raftLog;
 
-    private List<LogEntry> _logEntries;
+    public long LastLogIndex => _raftLog.CurrentOffset;
 
-    public long LastLogIndex => _logEntries.Count > 0 
-    ? _lastIncludedIndex + _logEntries.Count 
-    : _lastIncludedIndex;
+    public int LastLogTerm;
 
-    public long LastLogTerm => _logEntries.Count > 0 
-    ? _logEntries.Last().Term 
-    : _lastIncludedTerm;
+    private Dictionary<int,long> _nextIndex;
 
-    private RaftNode(Broker identity, List<Broker> clusterMembers,IRaftTransport raftTransport)
+    private Dictionary<int,long> _matchIndex;
+
+    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog)
     {
+        _basePath = basePath;
         _myIdentity = identity;
+        _logger = logger;
         _clusterMembers = clusterMembers;
         _raftTransport = raftTransport;
-        _logEntries =  new List<LogEntry>();
         _electionTimeoutCts = new CancellationTokenSource();
+        _raftLog = raftLog;
 
     }
 
 
-    public async Task<RaftNode> InitializeNode()
+    public static async Task<RaftNode> InitializeNode(
+        string basePath, 
+        Broker identity,
+        ILogger<Partition> partitionLogger,
+        List<Broker> clusterMembers, 
+        IRaftTransport raftTransport)
     {
+        RaftNodeState raftNodeState;
+        string statePath = Path.Combine(basePath, "nodestate.json");
+
+        if (!File.Exists(statePath))
+        {
+            // 1. Setup new persistent data
+            var initialData = new RaftNodeData 
+            { 
+                BrokerIdentity = identity,
+                NodeState = NodeState.Follower,
+                CurrentTerm = 0,
+                VotedFor = null,
+                LastIndex = 0,
+                LastTerm = 0
+            };
+
+            // 2. Persist it for the first time
+            await RaftNodeState.CreateAsync(basePath, initialData);
+            
+            string newFolder = Path.Combine(basePath, "__nodeLogEntries__");
+
+            // Create Partition. TODO - UPDATE BASE VALUES
+            Partition partition = new Partition(0,newFolder,identity.Id, false, partitionLogger, TimeSpan.FromHours(5), 1024);
+
+            
+
+            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition);
+        }
+            else
+            {
+                // 3.0 Define the path where logs are stored
+                string logFolder = Path.Combine(basePath, "__nodeLogEntries__");
+
+                // 3.1 Load existing persistent state (Term, VotedFor, etc.)
+                raftNodeState = await RaftNodeState.LoadAsync(basePath) 
+                            ?? throw new Exception("Failed to load existing state.");
+
+                // 3.2 Initialize the partition. 
+                // The constructor will automatically find and open existing .log and .index files.
+                Partition partition = new Partition(
+                    0, 
+                    logFolder, 
+                    identity.Id, 
+                    false, 
+                    partitionLogger, 
+                    TimeSpan.FromHours(5), 
+                    1024);
+
+                // 3.3 Create the node instance with the loaded partition
+                var raftNode = new RaftNode(
+                    basePath,
+                    raftNodeState.RaftNodeData.BrokerIdentity,
+                    clusterMembers,
+                    partitionLogger,
+                    raftTransport,
+                    partition);
+
+                return raftNode;
+            }
         
     }
 
-
-    private async Task SaveState()
+    private async Task PersistStateAsync()
+{
+    var data = new RaftNodeData
     {
-        private readonly string _topicJsonPath;
-        
+        BrokerIdentity = _myIdentity,
+        CurrentTerm = this.CurrentTerm,
+        VotedFor = this.VotedFor,
+        NodeState = this.State,
+        LastIndex = this.LastLogIndex,
+        LastTerm = this.CurrentTerm
+    };
 
-    }
-
-
-
+    await RaftNodeState.SaveStateAsync(_basePath,data);
+}
 
     private async Task ResetElectionTimer()
     {
@@ -159,8 +234,41 @@ public class RaftNode
         return;
     }
 
-    private void DeclareVictory()
+
+    private async Task DeclareVictory()
     {
+        
+        State = NodeState.Leader;
+
+        _nextIndex = new Dictionary<int, long>();
+        _matchIndex = new Dictionary<int, long>();
+
+
+        foreach( var member in _clusterMembers)
+        {
+            _nextIndex[member.Id] = LastLogIndex + 1;
+            _matchIndex[member.Id] = 0;
+        }
+        //Start Heartbeat loop
+        await StartHeartbeatLoop(_electionTimeoutCts.Token);
+
+    }
+
+    private async Task StartHeartbeatLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && State == NodeState.Leader)
+        {
+            await SendHeartbeats();
+            await Task.Delay(50, ct); // Heartbeat interval (e.g., 50ms)
+        }
+    }
+
+    private async Task SendHeartbeats()
+    {
+        foreach(var member in _clusterMembers)
+        {
+            
+        }
     }
 
     private void BecomeFollower(int currentTerm)
@@ -195,6 +303,8 @@ public class RaftNode
         
         VotedFor = request.BrokerId;
 
+        await PersistStateAsync();
+
          return new RequestVoteResponse
         {   
             Verdict = true,
@@ -212,6 +322,117 @@ public class RaftNode
             };
     }
 
+
+    public async Task AppendEntries(AppendEntriesRequest request)
+    {
+        
+    }
+
+    public async Task<AppendEntriesResponse> HandleAppendEntries(AppendEntriesRequest request)
+    {
+        // 1. Reply false if term < currentTerm
+        if (request.Term < CurrentTerm)
+        {
+            return new AppendEntriesResponse
+            {
+                Success = false,
+                Term = CurrentTerm,
+                LastLogIndex = LastLogIndex
+            };
+        }
+
+        // 2. If term is newer, step down
+        if (request.Term > CurrentTerm)
+        {
+            CurrentTerm = request.Term;
+            State = NodeState.Follower;
+            VotedFor = null;
+            await PersistStateAsync();
+        }
+
+        // 3. Reply false if log doesn’t contain PrevLogIndex
+        if (request.PrevLogIndex > LastLogIndex)
+        {
+            return new AppendEntriesResponse
+            {
+                Success = false,
+                Term = CurrentTerm,
+                LastLogIndex = LastLogIndex
+            };
+        }
+
+        // 4. Reply false if term mismatch at PrevLogIndex
+        if (request.PrevLogIndex >= 0)
+        {
+            byte[] anchorBytes = await _raftLog.ReadAsync(request.PrevLogIndex);
+            LogEntry anchorEntry = DeserializeLogEntry(anchorBytes);
+
+            if (anchorEntry.Term != request.PrevLogTerm)
+            {
+                return new AppendEntriesResponse
+                {
+                    Success = false,
+                    Term = CurrentTerm,
+                    LastLogIndex = LastLogIndex
+                };
+            }
+        }
+
+        // 5. Append / overwrite entries
+        for (int i = 0; i < request.Entries.Count; i++)
+        {
+            var entry = request.Entries[i];
+            long entryIndex = request.PrevLogIndex + 1 + i;
+
+            if (entryIndex <= LastLogIndex)
+            {
+                byte[] localData = await _raftLog.ReadAsync(entryIndex);
+                LogEntry localEntry = DeserializeLogEntry(localData);
+
+                if (localEntry.Term != entry.Term)
+                {
+                    await _raftLog.TruncateFromIndexAsync(entryIndex);
+                    await _raftLog.AppendAsync(SerializeLogEntry(entry));
+                }
+            }
+            else
+            {
+                await _raftLog.AppendAsync(SerializeLogEntry(entry));
+            }
+        }
+
+        return new AppendEntriesResponse
+        {
+            Success = true,
+            Term = CurrentTerm,
+            LastLogIndex = LastLogIndex
+        };
+    }
+
+        public byte[] SerializeLogEntry(LogEntry logEntry)
+    {
+        return JsonSerializer.SerializeToUtf8Bytes(logEntry);
+    }
+
+    public LogEntry DeserializeLogEntry(byte[] logEntryBytes)
+    {
+        return JsonSerializer.Deserialize<LogEntry>(logEntryBytes) 
+            ?? throw new Exception("Failed to deserialize LogEntry.");
+    }
+
+    public async Task<int> GetLastTermAsync()
+    {
+        if (_raftLog is null || _raftLog.IndexLength == 0) return 0;
+
+        byte[] lastLogBytes = await _raftLog.ReadAsync(LastLogIndex - 1);
+
+        LogEntry logEntry = DeserializeLogEntry(lastLogBytes);
+
+        if (logEntry is null) return 0;
+
+        return logEntry.Term;
+        
+    }
 
 
 }

@@ -2,79 +2,80 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using KafkaClone.Server.DTOs;
+using System.Text.Json;
 
 namespace KafkaClone.Server
 {
     public class RaftNodeState
     {
-        private readonly string _topicJsonPath;
+        private readonly string _raftNodeJsonPath;
+
+       public RaftNodeData RaftNodeData { get; private set; }
+
+    // Private constructor
+    private RaftNodeState(string raftNodeDirectory)
+    {
+        _raftNodeJsonPath = Path.Combine(raftNodeDirectory, "nodestate.json");
+    }
+
+    // ---------- FACTORIES ----------
+
+    // Create new state and save it
+    public static async Task<RaftNodeState> CreateAsync(string raftNodeDirectory,RaftNodeData nodeData)
+    {
+        var state = new RaftNodeState(raftNodeDirectory)
+        {
+            RaftNodeData = nodeData
+        };
+
+        await state.SaveAsync();
+        return state;
+    }
 
 
-        
+        public static async Task SaveStateAsync(string raftNodeDirectory,RaftNodeData nodeData)
+    {
+        var state = new RaftNodeState(raftNodeDirectory)
+        {
+            RaftNodeData = nodeData
+        };
 
+        await state.SaveAsync();
+    }
 
+    // Load existing state
+    public static async Task<RaftNodeState?> LoadAsync(string raftNodeDirectory)
+    {
+        var state = new RaftNodeState(raftNodeDirectory);
+
+        if (!File.Exists(state._raftNodeJsonPath))
+            return null;
+
+        await state.LoadInternalAsync();
+        return state;
+    }
+
+    // ---------- PERSISTENCE ----------
+
+    private async Task LoadInternalAsync()
+    {
+        using FileStream fs = File.OpenRead(_raftNodeJsonPath);
+
+        RaftNodeData? raftNodeData =
+            await JsonSerializer.DeserializeAsync<RaftNodeData>(fs);
+
+        if (RaftNodeData is null)
+            throw new InvalidDataException("state.json is empty or invalid");
+
+        RaftNodeData = raftNodeData;
+    }
+
+    public async Task SaveAsync()
+    {
+        using FileStream fs = File.Create(_raftNodeJsonPath);
+
+        await JsonSerializer.SerializeAsync(fs, RaftNodeData);
+    }
     }
 }
-
-// public class TopicState
-// {
-//     private readonly string _topicJsonPath;
-
-//     public TopicData TopicData { get; private set; }
-
-//     // Private constructor
-//     private TopicState(string topicDirectory)
-//     {
-//         _topicJsonPath = Path.Combine(topicDirectory, "state.json");
-//     }
-
-//     // ---------- FACTORIES ----------
-
-//     // Create new state and save it
-//     public static async Task<TopicState> CreateAsync(
-//         string topicDirectory,
-//         TopicData topicData)
-//     {
-//         var state = new TopicState(topicDirectory)
-//         {
-//             TopicData = topicData
-//         };
-
-//         await state.SaveAsync();
-//         return state;
-//     }
-
-//     // Load existing state
-//     public static async Task<TopicState?> LoadAsync(string topicDirectory)
-//     {
-//         var state = new TopicState(topicDirectory);
-
-//         if (!File.Exists(state._topicJsonPath))
-//             return null;
-
-//         await state.LoadInternalAsync();
-//         return state;
-//     }
-
-//     // ---------- PERSISTENCE ----------
-
-//     private async Task LoadInternalAsync()
-//     {
-//         using FileStream fs = File.OpenRead(_topicJsonPath);
-
-//         TopicData? topicData =
-//             await JsonSerializer.DeserializeAsync<TopicData>(fs);
-
-//         if (topicData is null)
-//             throw new InvalidDataException("state.json is empty or invalid");
-
-//         TopicData = topicData;
-//     }
-
-//     public async Task SaveAsync()
-//     {
-//         using FileStream fs = File.Create(_topicJsonPath);
-
-//         await JsonSerializer.SerializeAsync(fs, TopicData);
-//     }
-// }

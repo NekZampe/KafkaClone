@@ -22,7 +22,6 @@ public class Broker
         Port = port;
         Host = host;
     }
-
         // Id (4 bytes)
         // HostLength (2 bytes)
         // Host (N bytes)
