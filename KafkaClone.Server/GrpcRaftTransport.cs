@@ -61,11 +61,8 @@ public async Task<RequestVoteResponse> SendRequestVoteRequest(RequestVoteRequest
 public async Task<AppendEntriesResponse> SendAppendEntriesRequest(AppendEntriesRequest request, Broker broker)
     {
 
-
         try
         {
-
-
         // 1. Get the stub for this specific broker
         var client = _clients[broker.Id];
 
@@ -90,8 +87,4 @@ public async Task<AppendEntriesResponse> SendAppendEntriesRequest(AppendEntriesR
         }
         
     }
-
-
-
-
 }

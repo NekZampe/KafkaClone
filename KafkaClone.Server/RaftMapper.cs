@@ -33,6 +33,26 @@ public static class RaftMapper
     }
 
     // =========================
+    // Command
+    // =========================
+
+    public static CommandProto ToProto(IClusterCommand command)
+    {
+        byte[] commandBytes = JsonSerializer.SerializeToUtf8Bytes(command);
+
+        return new CommandProto
+        {
+            Data = ByteString.CopyFrom(commandBytes)
+        };
+    }
+
+    public static IClusterCommand ToInternal(CommandProto proto)
+    {
+        return DeserializeCommand(proto.Data.ToByteArray());
+    }
+
+
+    // =========================
     // RequestVote
     // =========================
 
@@ -144,7 +164,6 @@ public static class RaftMapper
         return type switch
         {
             "CreateTopic" => JsonSerializer.Deserialize<CreateTopic>(data)!,
-            "DeleteTopic" => JsonSerializer.Deserialize<DeleteTopic>(data)!,
             "RegisterBroker" => JsonSerializer.Deserialize<RegisterBroker>(data)!,
             "ConsumerOffset" => JsonSerializer.Deserialize<ConsumerOffset>(data)!,
             _ => throw new Exception($"Unknown command type: {type}")

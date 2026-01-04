@@ -10,6 +10,7 @@ namespace KafkaClone.Server.DTOs
         public bool Success;
         public int Term;
         public long LastLogIndex;
+        public long LastLogTerm;
         
     }
 }

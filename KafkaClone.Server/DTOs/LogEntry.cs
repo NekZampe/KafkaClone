@@ -22,13 +22,6 @@ namespace KafkaClone.Server.DTOs
         public int Partitions { get; set; }
     }
 
-    // 3. Delete Topic
-    public class DeleteTopic : IClusterCommand
-    {
-        public string CommandType => "DeleteTopic";
-        public string Name { get; set; }
-    }
-
     // 4. Register Broker
     public class RegisterBroker : IClusterCommand
     {
@@ -38,35 +31,6 @@ namespace KafkaClone.Server.DTOs
         public int Port { get; set; }
     }
 
-    // 5. Alter topic config
-    public class AlterTopicConfig : IClusterCommand
-    {
-        public string CommandType => "AlterTopicConfig";
-
-        public string Key { get; set; }
-
-        public string Value {get;set;}
-
-    }
-    // 6. Reassign partitions
-    public class ReassignPartitions : IClusterCommand
-    {
-        public string CommandType => "ReassignPartitions";
-
-        public string TopicName {get;set;}
-
-        public List<PartitionMetadata> PartitionMetadata {get;set;} = new List<PartitionMetadata>();
-
-    }
-
-            public class PartitionMetadata
-        {
-            public int PartitionId {get;set;}
-            public int BrokerId {get;set;}
-
-        }
-
-    
     // 7. Consumer Data
         public class ConsumerOffset : IClusterCommand
     {

@@ -12,9 +12,7 @@ namespace KafkaClone.Server.DTOs
         public NodeState NodeState {get;set;}
         public int CurrentTerm {get;set;}
         public int? VotedFor {get;set;}
-        public long LastIndex;
         public int LastTerm;
-
         public long LeaderCommit {get;set;}
     }
 }

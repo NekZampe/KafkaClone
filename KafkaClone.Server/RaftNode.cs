@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using System.Collections;
 
 namespace KafkaClone.Server;
 
@@ -29,6 +30,8 @@ public class RaftNode
     // We need a list of peers to ask for votes
     private readonly List<Broker> _clusterMembers;
 
+    public int? CurrentLeaderId { get; private set; }
+
     public int? VotedFor { get; private set; }
 
     public int CurrentTerm { get; private set; }
@@ -51,13 +54,13 @@ public class RaftNode
 
     public int LastLogTerm;
 
-    private Dictionary<int,long> _nextIndex;
+    public long LeaderCommit = 0; // Highest index of commited file
 
-    private Dictionary<int,long> _matchIndex;
+    private Dictionary<int,long> _nextIndex; // Used to find common anchor
 
-    public long LeaderCommit = 0;
+    private Dictionary<int,long> _matchIndex; // Highest Index of follower commited
 
-    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog)
+    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog, RaftNodeData nodeData)
     {
         _basePath = basePath;
         _myIdentity = identity;
@@ -67,8 +70,14 @@ public class RaftNode
         _electionTimeoutCts = new CancellationTokenSource();
         _raftLog = raftLog;
 
-    }
+        // Apply RaftNodeState data
+        this.CurrentTerm = nodeData.CurrentTerm;
+        this.State = nodeData.NodeState;
+        this.LastLogTerm = nodeData.LastTerm;
+        this.LeaderCommit = nodeData.LeaderCommit;
+        this.VotedFor = nodeData.VotedFor;
 
+    }
 
     public static async Task<RaftNode> InitializeNode(
         string basePath, 
@@ -89,8 +98,8 @@ public class RaftNode
                 NodeState = NodeState.Follower,
                 CurrentTerm = 0,
                 VotedFor = null,
-                LastIndex = 0,
-                LastTerm = 0
+                LastTerm = 0,
+                LeaderCommit = 0
             };
 
             // 2. Persist it for the first time
@@ -102,8 +111,7 @@ public class RaftNode
             Partition partition = new Partition(0,newFolder,identity.Id, false, partitionLogger, TimeSpan.FromHours(5), 1024);
 
             
-
-            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition);
+            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData);
         }
             else
             {
@@ -111,7 +119,7 @@ public class RaftNode
                 string logFolder = Path.Combine(basePath, "__nodeLogEntries__");
 
                 // 3.1 Load existing persistent state (Term, VotedFor, etc.)
-                raftNodeState = await RaftNodeState.LoadAsync(basePath) 
+                raftNodeState = await RaftNodeState.LoadAsync(statePath) 
                             ?? throw new Exception("Failed to load existing state.");
 
                 // 3.2 Initialize the partition. 
@@ -132,7 +140,8 @@ public class RaftNode
                     clusterMembers,
                     partitionLogger,
                     raftTransport,
-                    partition);
+                    partition,
+                    raftNodeState.RaftNodeData);
 
                 return raftNode;
             }
@@ -147,7 +156,6 @@ public class RaftNode
         CurrentTerm = this.CurrentTerm,
         VotedFor = this.VotedFor,
         NodeState = this.State,
-        LastIndex = this.LastLogIndex,
         LastTerm = this.CurrentTerm
     };
 
@@ -218,7 +226,7 @@ public class RaftNode
             // If a peer has a higher term, we must step down immediately
             if ( response.CurrentTerm > CurrentTerm)
             {
-                BecomeFollower(response.CurrentTerm);
+                await BecomeFollower(response.CurrentTerm);
                 return;
             }
             // Count the vote if it was granted
@@ -228,7 +236,7 @@ public class RaftNode
             // Check for victory immediately after counting
             if ( counter >= majority)
             {
-                DeclareVictory();
+                await DeclareVictory();
                 return;
             } 
         }
@@ -241,6 +249,7 @@ public class RaftNode
     {
         
         State = NodeState.Leader;
+        CurrentLeaderId = _myIdentity.Id;
 
         _nextIndex = new Dictionary<int, long>();
         _matchIndex = new Dictionary<int, long>();
@@ -278,19 +287,122 @@ public class RaftNode
             Term = CurrentTerm,
             LeaderId = _myIdentity.Id,
             PrevLogIndex = offset,
-            PrevLogTerm = await GetTermByOffset(offset),
+            PrevLogTerm = await GetTermByIndex(offset),
             LeaderCommit = LastLogIndex,
             Entries = new List<LogEntry>()
             
         };
-            await _raftTransport.SendAppendEntriesRequest(heartbeat,member);
+            var response = await _raftTransport.SendAppendEntriesRequest(heartbeat,member);
+
         }
     }
 
-    private void BecomeFollower(int currentTerm)
+  
+private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broker broker)
+{
+    // 1. Follower's term is higher so we step down
+    if (response.Term > CurrentTerm)
+    {
+        await BecomeFollower(response.Term);
+        return; // Stop processing after stepping down
+    }
+
+    // 2. Follower's Log index is behind
+    if (!response.Success)
+    {
+        // Decrement nextIndex and retry
+        if (_nextIndex[broker.Id] > 0)
+        {
+            _nextIndex[broker.Id]--;
+        }
+        
+        // The next heartbeat will retry with the decremented index
+        return;
+    }
+
+    // 3. Success case - update matchIndex and nextIndex
+    if (response.Success)
+    {
+        // Update match and next indices
+        _matchIndex[broker.Id] = response.LastLogIndex;
+        _nextIndex[broker.Id] = response.LastLogIndex + 1;
+
+        // 4. Update commit index based on majority replication
+        await UpdateCommitIndex();
+    }
+}
+
+private async Task UpdateCommitIndex()
+{
+    // Collect all match indices including our own log
+    var matchIndices = new List<long> { LastLogIndex };
+    
+    foreach (var kvp in _matchIndex)
+    {
+        matchIndices.Add(kvp.Value);
+    }
+
+    matchIndices.Sort();
+    matchIndices.Reverse(); // Sort in DESCENDING order
+    
+    // Find the median (majority) index
+    int majorityIndex = matchIndices.Count / 2;
+    long newCommitIndex = matchIndices[majorityIndex];
+
+    // Only commit entries from current term (Raft safety requirement)
+    if (newCommitIndex > LeaderCommit)
+    {
+        long termAtIndex = await GetTermByIndex(newCommitIndex);
+        
+        if (termAtIndex == CurrentTerm)
+        {
+            LeaderCommit = newCommitIndex;
+            await PersistStateAsync();
+        }
+    }
+}
+// The Flow of Data
+// Append: New commands are added to the end of the Log. (They are uncommitted).
+
+// Replicate: We wait for a majority of nodes to have these entries.
+
+// Commit: We update CommitIndex.
+
+// Apply: This ApplyCommittedEntriesAsync method looks at the log and says, 
+// "Oh, LastApplied is 5, but CommitIndex is 7. I need to apply entries 6 and 7."
+
+
+    public async Task<bool> Propose(IClusterCommand command)
+    {
+
+        if (_myIdentity.Id != CurrentLeaderId)
+        {
+            await IRaftTransport.
+        }
+
+        var type = command.CommandType;
+
+        switch (type)
+        {
+            case "CreateTopic":
+            break;
+            case "RegisterBroker":
+            break;
+            case "ConsumerOffset":
+            break;
+        }
+        
+    }
+
+
+
+
+
+    private async Task BecomeFollower(int term)
     {
         State = NodeState.Follower;
-        CurrentTerm = currentTerm;
+        CurrentTerm = term;
+        await PersistStateAsync();
     }
 
 
@@ -334,7 +446,6 @@ public class RaftNode
             {   
                 Verdict = false,
                 CurrentTerm = CurrentTerm
-
             };
     }
 
@@ -359,6 +470,14 @@ public class RaftNode
             VotedFor = null;
             await PersistStateAsync();
         }
+
+        if (CurrentLeaderId != request.LeaderId)
+        {
+            CurrentLeaderId = request.LeaderId;
+            await PersistStateAsync();
+        }
+
+        await ResetElectionTimer();
 
         // 3. Reply false if log doesn’t contain PrevLogIndex
         if (request.PrevLogIndex > LastLogIndex)
@@ -403,6 +522,7 @@ public class RaftNode
                 {
                     await _raftLog.TruncateFromIndexAsync(entryIndex);
                     await _raftLog.AppendAsync(SerializeLogEntry(entry));
+                    LastLogTerm = entry.Term;
                 }
             }
             else
@@ -444,17 +564,17 @@ public class RaftNode
         
     }
 
-    private async Task<int> GetTermByOffset(long offset)
+    private async Task<int> GetTermByIndex(long index)
     {
         // Raft convention: the term at the very beginning of time is 0
-        if (offset <= 0) 
+        if (index <= 0) 
         {
             return 0; 
         }
 
         try 
         {
-            byte[] logBytes = await _raftLog.ReadAsync(offset);
+            byte[] logBytes = await _raftLog.ReadAsync(index);
             LogEntry log = DeserializeLogEntry(logBytes);
             return log.Term;
         }

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("KafkaClone.Server")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f5069225513b7e3e06f2244d3fcdd801de382a73")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ef1f5584f75d4d5b37e92420018a9224eee70710")]
 [assembly: System.Reflection.AssemblyProductAttribute("KafkaClone.Server")]
 [assembly: System.Reflection.AssemblyTitleAttribute("KafkaClone.Server")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

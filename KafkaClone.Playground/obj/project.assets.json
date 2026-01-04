@@ -1126,35 +1126,43 @@
     ]
   },
   "packageFolders": {
-    "/home/nektarios/.nuget/packages/": {}
+    "C:\\Users\\Nektarios\\.nuget\\packages\\": {},
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Playground/KafkaClone.Playground.csproj",
+      "projectUniqueName": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Playground\\KafkaClone.Playground.csproj",
       "projectName": "KafkaClone.Playground",
-      "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Playground/KafkaClone.Playground.csproj",
-      "packagesPath": "/home/nektarios/.nuget/packages/",
-      "outputPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Playground/obj/",
+      "projectPath": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Playground\\KafkaClone.Playground.csproj",
+      "packagesPath": "C:\\Users\\Nektarios\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Playground\\obj\\",
       "projectStyle": "PackageReference",
+      "fallbackFolders": [
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+      ],
       "configFilePaths": [
-        "/home/nektarios/.nuget/NuGet/NuGet.Config"
+        "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\NuGet.Config",
+        "C:\\Users\\Nektarios\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
       "originalTargetFrameworks": [
         "net9.0"
       ],
       "sources": {
+        "C:\\Program Files\\dotnet\\library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "net9.0": {
           "targetAlias": "net9.0",
           "projectReferences": {
-            "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj": {
-              "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Shared/KafkaClone.Shared.csproj"
+            "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Shared\\KafkaClone.Shared.csproj": {
+              "projectPath": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Shared\\KafkaClone.Shared.csproj"
             },
-            "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/KafkaClone.Storage.csproj": {
-              "projectPath": "/home/nektarios/Desktop/Projects/KafkaClone/KafkaClone.Storage/KafkaClone.Storage.csproj"
+            "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Storage\\KafkaClone.Storage.csproj": {
+              "projectPath": "C:\\Users\\Nektarios\\Desktop\\KafkaClone\\KafkaClone.Storage\\KafkaClone.Storage.csproj"
             }
           }
         }
@@ -1169,7 +1177,7 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "9.0.200"
+      "SdkAnalysisLevel": "9.0.300"
     },
     "frameworks": {
       "net9.0": {
@@ -1190,7 +1198,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/9.0.203/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.305/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
