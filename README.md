@@ -105,3 +105,7 @@ Once the **Playground** client is running, you can interact with the server usin
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+
+<img width="553" height="682" alt="image" src="https://github.com/user-attachments/assets/0336f7fa-5aee-449c-af29-6bf24d5ad575" />
+
