@@ -21,7 +21,7 @@ public class RaftNode
 {
     private readonly string _basePath;
     private readonly Broker _myIdentity;
-
+    private readonly ClusterState _clusterState;
     private readonly ILogger<Partition> _logger;
     
     // The current state (starts as Follower)
@@ -56,11 +56,13 @@ public class RaftNode
 
     public long LeaderCommit = 0; // Highest index of commited file
 
+    private long _lastApplied = 0;
+
     private Dictionary<int,long> _nextIndex; // Used to find common anchor
 
     private Dictionary<int,long> _matchIndex; // Highest Index of follower commited
 
-    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog, RaftNodeData nodeData)
+    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog, RaftNodeData nodeData,ClusterState clusterState)
     {
         _basePath = basePath;
         _myIdentity = identity;
@@ -69,6 +71,7 @@ public class RaftNode
         _raftTransport = raftTransport;
         _electionTimeoutCts = new CancellationTokenSource();
         _raftLog = raftLog;
+         _clusterState = clusterState;
 
         // Apply RaftNodeState data
         this.CurrentTerm = nodeData.CurrentTerm;
@@ -87,6 +90,7 @@ public class RaftNode
         IRaftTransport raftTransport)
     {
         RaftNodeState raftNodeState;
+        var clusterState = new ClusterState(basePath);
         string statePath = Path.Combine(basePath, "nodestate.json");
 
         if (!File.Exists(statePath))
@@ -111,7 +115,7 @@ public class RaftNode
             Partition partition = new Partition(0,newFolder,identity.Id, false, partitionLogger, TimeSpan.FromHours(5), 1024);
 
             
-            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData);
+            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData,clusterState);
         }
             else
             {
@@ -141,7 +145,10 @@ public class RaftNode
                     partitionLogger,
                     raftTransport,
                     partition,
-                    raftNodeState.RaftNodeData);
+                    raftNodeState.RaftNodeData,
+                    clusterState);
+
+                await raftNode.ReplayLog();
 
                 return raftNode;
             }
@@ -274,29 +281,76 @@ public class RaftNode
         }
     }
 
-    private async Task SendHeartbeats()
+private async Task SendHeartbeats()
+{
+    var tasks = new List<Task>();
+
+    foreach (var member in _clusterMembers)
     {
-
-        foreach(var member in _clusterMembers)
+        // Capture member variable for the closure
+        var broker = member; 
+        
+        tasks.Add(Task.Run(async () => 
         {
-            var offset = _nextIndex[member.Id]-1;
-            if ( offset < 0) offset = 0;
+            try 
+            {
+                long nextIdx = _nextIndex[broker.Id];
+                var entriesToSend = new List<LogEntry>();
 
-            var heartbeat =  new AppendEntriesRequest
-        {
-            Term = CurrentTerm,
-            LeaderId = _myIdentity.Id,
-            PrevLogIndex = offset,
-            PrevLogTerm = await GetTermByIndex(offset),
-            LeaderCommit = LastLogIndex,
-            Entries = new List<LogEntry>()
-            
-        };
-            var response = await _raftTransport.SendAppendEntriesRequest(heartbeat,member);
+                // FIX: Actually fetch entries if the follower is behind
+                if (LastLogIndex >= nextIdx)
+                {
+                    entriesToSend = await GetLogEntries(nextIdx, LastLogIndex); 
+                }
 
-        }
+                var prevLogIndex = nextIdx - 1;
+                // Safety check for beginning of log
+                if (prevLogIndex < 0) prevLogIndex = 0; 
+
+                var heartbeat = new AppendEntriesRequest
+                {
+                    Term = CurrentTerm,
+                    LeaderId = _myIdentity.Id,
+                    PrevLogIndex = prevLogIndex,
+                    PrevLogTerm = await GetTermByIndex(prevLogIndex),
+                    LeaderCommit = LeaderCommit,
+                    Entries = entriesToSend // FIX: Now sends actual data
+                };
+
+                var response = await _raftTransport.SendAppendEntriesRequest(heartbeat, broker);
+                
+                // FIX: Actually handle the response!
+                await HandleHeartbeatResponse(response, broker);
+            }
+            catch (Exception ex)
+            {
+                // Log failure to reach this specific node, don't crash loop
+                Console.WriteLine($"Failed to contact {broker.Id}: {ex.Message}");
+            }
+        }));
     }
 
+    // Send to all nodes in parallel
+    await Task.WhenAll(tasks);
+}
+
+
+// Helper to retrieve a range of logs from storage
+private async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
+{
+
+    int count = (int) (endIndex - startIndex);
+    var list = new List<LogEntry>();
+
+    var result = await _raftLog.ReadBatchAsync(startIndex,count);
+
+    foreach(var logBytes in result.Messages)
+    {
+        list.Add(DeserializeLogEntry(logBytes));
+    }
+
+    return list;
+}
   
 private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broker broker)
 {
@@ -361,42 +415,49 @@ private async Task UpdateCommitIndex()
         }
     }
 }
-// The Flow of Data
-// Append: New commands are added to the end of the Log. (They are uncommitted).
-
-// Replicate: We wait for a majority of nodes to have these entries.
-
-// Commit: We update CommitIndex.
-
-// Apply: This ApplyCommittedEntriesAsync method looks at the log and says, 
-// "Oh, LastApplied is 5, but CommitIndex is 7. I need to apply entries 6 and 7."
 
 
-    public async Task<bool> Propose(IClusterCommand command)
+public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
+{
+    // 1. Forwarding Logic
+    if (_myIdentity.Id != CurrentLeaderId)
     {
-
-        if (_myIdentity.Id != CurrentLeaderId)
+        var leaderBroker = _clusterMembers.FirstOrDefault(broker => broker.Id == CurrentLeaderId);
+        if (leaderBroker == null) return new ForwardCommandResponse
         {
-            await IRaftTransport.
-        }
-
-        var type = command.CommandType;
-
-        switch (type)
-        {
-            case "CreateTopic":
-            break;
-            case "RegisterBroker":
-            break;
-            case "ConsumerOffset":
-            break;
-        }
-        
+            Success = false,
+            ErrorMessage = $"No Leader Found"
+        };
+        var response = await _raftTransport.ForwardCommand(command, leaderBroker); 
+        return response;
     }
 
+    // 2. Leader Logic: Create Log Entry
+    // Note: The Switch statement usually happens during 'Apply', not 'Propose'. 
+    // Here we just want to get it into the log safely.
+    var newEntry = new LogEntry
+    {
+        Term = CurrentTerm,
+        Index = LastLogIndex + 1, // Determine new index
+        Command = command
+    };
 
+    await _raftLog.AppendAsync(SerializeLogEntry(newEntry));
+    
+    // We match our own index immediately
+    _matchIndex[_myIdentity.Id] = LastLogIndex; 
+    _nextIndex[_myIdentity.Id] = LastLogIndex + 1;
 
+    // 5. Trigger replication 
+    _ = SendHeartbeats(); 
 
+    // We return true that we accepted it. 
+    return new ForwardCommandResponse
+    {
+        Success = true,
+        ErrorMessage = null
+    }; 
+}
 
     private async Task BecomeFollower(int term)
     {
@@ -584,6 +645,33 @@ private async Task UpdateCommitIndex()
             return 0;
         }
     }
+
+
+    private async Task ReplayLog()
+    {
+        for (long i = 0; i <= LeaderCommit; i++)
+        {
+            try
+            {
+                byte[] entryBytes = await _raftLog.ReadAsync(i);
+                LogEntry entry = DeserializeLogEntry(entryBytes);
+                await _clusterState.ApplyCommand(entry.Command);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to replay log entry {i}: {ex.Message}");
+                break;
+            }
+        }
+        _lastApplied = LeaderCommit;
+    }
+
+
+    // // Add query methods
+    // public TopicData? GetTopic(string name) => _clusterState.GetTopic(name);
+    // public List<Broker> GetAllBrokers() => _clusterState.GetAllBrokers();
+    // public long GetConsumerOffset(string group, string topic, int partition) 
+    //     => _clusterState.OffsetManager.GetOffset(group, topic, partition);
 
 
 }

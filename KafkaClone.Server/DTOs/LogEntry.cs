@@ -42,6 +42,14 @@ namespace KafkaClone.Server.DTOs
 
     }
 
+    //-------------------------------- FORWARD COMMAND RESPONSE ----------------------------
+        public class ForwardCommandResponse
+            {
+            public bool Success { get; set; }
+            public string? ErrorMessage { get; set; }
+
+            }
+
 
     //-------------------------------- LOG ENTRY ----------------------------
     public class LogEntry

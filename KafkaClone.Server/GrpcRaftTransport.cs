@@ -87,4 +87,31 @@ public async Task<AppendEntriesResponse> SendAppendEntriesRequest(AppendEntriesR
         }
         
     }
+
+
+    public async Task<ForwardCommandResponse> ForwardCommand(IClusterCommand request, Broker broker)
+    {
+        try
+        {
+            // 1. Get the stub for this specific broker
+            var client = _clients[broker.Id];
+
+            // 2. Map internal DTO to Protobuf message
+            var protoRequest = RaftMapper.ToProto(request);
+
+            // 3. Perform the gRPC call with a timeout (optional but recommended)
+            var protoResponse = await client.ForwardCommandAsync(protoRequest);
+
+            // 4. Map back to our internal response type
+            return RaftMapper.ToInternal(protoResponse);
+        }
+        catch (Exception ex)
+        {
+            return new ForwardCommandResponse
+            {
+                Success = false,
+                ErrorMessage = $"Failed to forward command: {ex.Message}"
+            };
+        }
+    }
 }

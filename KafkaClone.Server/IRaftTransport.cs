@@ -12,6 +12,6 @@ namespace KafkaClone.Server
     {
         public Task<RequestVoteResponse> SendRequestVoteRequest(RequestVoteRequest requestVoteRequest, Broker broker);
         public Task<AppendEntriesResponse> SendAppendEntriesRequest(AppendEntriesRequest request, Broker broker);
-        public Task<AppendEntriesResponse> ForwardCommand(IClusterCommand request, Broker broker);
+        public Task<ForwardCommandResponse> ForwardCommand(IClusterCommand request, Broker broker);
     }
 }

@@ -51,6 +51,29 @@ public static class RaftMapper
         return DeserializeCommand(proto.Data.ToByteArray());
     }
 
+    // =========================
+    // Command Response
+    // =========================
+
+    public static ForwardCommandResponseProto ToProto(ForwardCommandResponse response)
+    {
+
+        return new ForwardCommandResponseProto
+        {
+            Success = response.Success,
+            ErrorMessage = response.ErrorMessage
+        };
+    }
+
+    public static ForwardCommandResponse ToInternal(ForwardCommandResponseProto proto)
+    {
+        return new ForwardCommandResponse
+        {
+            Success = proto.Success,
+            ErrorMessage = proto.ErrorMessage
+        };
+    }
+
 
     // =========================
     // RequestVote
