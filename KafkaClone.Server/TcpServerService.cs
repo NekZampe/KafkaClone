@@ -75,6 +75,18 @@ public class TcpServerService : BackgroundService
                         case 3: // BATCH CONSUME
                             await HandleBatchConsume(stream, ct);
                             break;
+                        case 4: // FETCH OFFSET
+                            await HandleFetchOffset(stream, ct);
+                            break;
+                        case 5: // COMMIT OFFSET
+                            await HandleCommitGroupOffset(stream, ct);
+                            break;
+                        case 6: // GET TOPIC METADATA
+                            await HandleGetTopicMetaData(stream, ct);
+                            break;
+                        case 7: // GET BROKERS DATA
+                            await HandleGetBrokerList(stream, ct);
+                            break;
                         default:
                             _logger.LogWarning($"Unknown Command: {cmdBuffer[0]}");
                             break;
@@ -277,4 +289,148 @@ private async Task HandleBatchProduce(NetworkStream stream, CancellationToken ct
 
         await bufferedStream.FlushAsync();
     }
+
+
+
+private async Task HandleFetchOffset(NetworkStream stream, CancellationToken ct)
+{
+    // ------------- FETCH OFFSET -----------------
+    // Protocol: |2|len|group|len|topic|4|partId|
+    // ----------------------------------------------
+
+    // 1. Read Group
+    byte[] groupLenBuf = new byte[2];
+    await stream.ReadExactlyAsync(groupLenBuf, 0, 2);
+    short groupLen = BitConverter.ToInt16(groupLenBuf);
+
+    byte[] groupBuf = new byte[groupLen];
+    await stream.ReadExactlyAsync(groupBuf, 0, groupLen);
+    string group = Encoding.UTF8.GetString(groupBuf);
+
+    // 2. Read Topic
+    byte[] topicLenBuf = new byte[2];
+    await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
+    short topicLen = BitConverter.ToInt16(topicLenBuf);
+    byte[] topicBuf = new byte[topicLen];
+    await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
+    string topic = Encoding.UTF8.GetString(topicBuf);
+
+    // 3. Read Partition ID
+    byte[] partIdBuf = new byte[4];
+    await stream.ReadExactlyAsync(partIdBuf, 0, 4);
+    int partitionId = BitConverter.ToInt32(partIdBuf);
+
+    // 4. Retrieve
+    long storedOffset = await _brokerService.FetchOffset(group,topic,partitionId);
+
+    // 5. Send back
+    await stream.WriteAsync(BitConverter.GetBytes(storedOffset));
+    _logger.LogDebug($"[Fetch] Group '{group}' on '{topic}-{partitionId}' is @ {storedOffset}");
+    
 }
+
+private async Task HandleCommitGroupOffset(NetworkStream stream, CancellationToken ct)
+    {
+         
+    // --------------------- COMMIT --------------------------
+    // Protocol: |3|len|group|len|topic|4|partId|8|offset
+    // --------------------------------------------------------
+
+    // 1. Read Group
+    byte[] groupLenBuf = new byte[2];
+    await stream.ReadExactlyAsync(groupLenBuf, 0, 2);
+    short groupLen = BitConverter.ToInt16(groupLenBuf);
+    byte[] groupBuf = new byte[groupLen];
+    await stream.ReadExactlyAsync(groupBuf, 0, groupLen);
+    string group = Encoding.UTF8.GetString(groupBuf);
+
+    // 2. Read Topic
+    byte[] topicLenBuf = new byte[2];
+    await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
+    short topicLen = BitConverter.ToInt16(topicLenBuf);
+    byte[] topicBuf = new byte[topicLen];
+    await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
+    string topic = Encoding.UTF8.GetString(topicBuf);
+
+    // 3. Read Partition ID
+    byte[] partIdBuf = new byte[4];
+    await stream.ReadExactlyAsync(partIdBuf, 0, 4);
+    int partitionId = BitConverter.ToInt32(partIdBuf);
+
+    // 4. Read Offset
+    byte[] offsetBuf = new byte[8];
+    await stream.ReadExactlyAsync(offsetBuf, 0, 8);
+    long offsetToCommit = BitConverter.ToInt64(offsetBuf);
+
+    // 5. Save
+    await _brokerService.CommitGroupOffset(group, topic, partitionId, offsetToCommit);
+
+    _logger.LogDebug($"[Commit] Group '{group}' on '{topic}-{partitionId}' @ {offsetToCommit}");
+}
+
+
+private async Task HandleGetTopicMetaData(NetworkStream stream, CancellationToken ct)
+    {
+    
+    // 1. Read Topic
+    byte[] topicLenBuf = new byte[2];
+    await stream.ReadExactlyAsync(topicLenBuf, 0, 2);
+    short topicLen = BitConverter.ToInt16(topicLenBuf);
+    byte[] topicBuf = new byte[topicLen];
+    await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
+    string topic = Encoding.UTF8.GetString(topicBuf);
+
+    var result = await _brokerService.GetTopicMetadata(topic);
+
+    int responseSize = 4 + result.data.Length;
+    byte[] responseBuffer = new byte[responseSize];
+
+    using (var writer = new MemoryStream(responseBuffer))
+    using (var binWriter = new BinaryWriter(writer))
+    {
+        // A. Write Count (4 bytes)
+        // If partitionCount is 0, the client knows the topic doesn't exist.
+        binWriter.Write(result.count);
+
+        // B. Write Payload (N bytes)
+        if (result.count > 0)
+        {
+            binWriter.Write(result.count);
+        }
+    }
+    // --- 4. SEND TO CLIENT ---
+    await stream.WriteAsync(responseBuffer, 0, responseBuffer.Length, ct);
+        
+    }
+
+
+private async Task HandleGetBrokerList(NetworkStream stream, CancellationToken ct)
+{
+    // 1. FETCH DATA
+    // Returns: (Raw bytes of all brokers, Count of brokers)
+    var (brokerData, brokerCount) = await _brokerService.GetBrokerMetadata();
+
+    // 2. CONSTRUCT RESPONSE
+    // Size = 4 bytes (for the int Count) + Length of the data blob
+    int responseSize = 4 + brokerData.Length;
+    byte[] responseBuffer = new byte[responseSize];
+
+    using (var ms = new MemoryStream(responseBuffer))
+    using (var binWriter = new BinaryWriter(ms))
+    {
+        // A. Write Header: The Count (4 bytes)
+        // Example: If you have 3 brokers, this writes [3, 0, 0, 0]
+        binWriter.Write(brokerCount);
+
+        // B. Write Payload: The Broker Data
+        // This contains [ID][HostLen][Host][Port] for every broker
+        if (brokerData.Length > 0)
+        {
+            binWriter.Write(brokerData);
+        }
+    }
+
+    // 3. SEND TO CLIENT
+    await stream.WriteAsync(responseBuffer, 0, responseBuffer.Length, ct);
+}
+    }

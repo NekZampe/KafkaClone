@@ -28,7 +28,7 @@ public class RaftNode
     public NodeState State { get; private set; } = NodeState.Follower;
 
     // We need a list of peers to ask for votes
-    private readonly List<Broker> _clusterMembers;
+    private List<Broker> _clusterMembers;
 
     public int? CurrentLeaderId { get; private set; }
 
@@ -57,6 +57,7 @@ public class RaftNode
     public long LeaderCommit = 0; // Highest index of commited file
 
     private long _lastApplied = 0;
+    public long LastApplied => _lastApplied;
 
     private Dictionary<int,long> _nextIndex; // Used to find common anchor
 
@@ -85,12 +86,12 @@ public class RaftNode
     public static async Task<RaftNode> InitializeNode(
         string basePath, 
         Broker identity,
-        ILogger<Partition> partitionLogger,
-        List<Broker> clusterMembers, 
-        IRaftTransport raftTransport)
+        ILogger<Partition> partitionLogger, 
+        IRaftTransport raftTransport,
+        ClusterState clusterState)
     {
+        var clusterMembers = clusterState.GetAllBrokers();
         RaftNodeState raftNodeState;
-        var clusterState = new ClusterState(basePath);
         string statePath = Path.Combine(basePath, "nodestate.json");
 
         if (!File.Exists(statePath))
@@ -112,7 +113,7 @@ public class RaftNode
             string newFolder = Path.Combine(basePath, "__nodeLogEntries__");
 
             // Create Partition. TODO - UPDATE BASE VALUES
-            Partition partition = new Partition(0,newFolder,identity.Id, false, partitionLogger, TimeSpan.FromHours(5), 1024);
+            Partition partition = new Partition(0,newFolder, false, partitionLogger, TimeSpan.FromHours(5), 1024);
 
             
             return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData,clusterState);
@@ -131,7 +132,6 @@ public class RaftNode
                 Partition partition = new Partition(
                     0, 
                     logFolder, 
-                    identity.Id, 
                     false, 
                     partitionLogger, 
                     TimeSpan.FromHours(5), 
@@ -336,7 +336,7 @@ private async Task SendHeartbeats()
 
 
 // Helper to retrieve a range of logs from storage
-private async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
+public async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
 {
 
     int count = (int) (endIndex - startIndex);
@@ -431,6 +431,9 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         var response = await _raftTransport.ForwardCommand(command, leaderBroker); 
         return response;
     }
+
+
+    // SEND TO CLUSTER 
 
     // 2. Leader Logic: Create Log Entry
     // Note: The Switch statement usually happens during 'Apply', not 'Propose'. 
@@ -646,32 +649,77 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         }
     }
 
+    public async Task UpdateLastApplied(long index)
+    {
+        _lastApplied = index;
+    }
 
     private async Task ReplayLog()
+{
+    _logger.LogInformation("Replaying Raft Log to restore Cluster State...");
+    
+     _lastApplied = 0;
+
+    // 1. Iterate through the entire log from the beginning
+    long logSize = _raftLog.CurrentOffset; 
+    
+    for (long index = 0; index < logSize; index++)
     {
-        for (long i = 0; i <= LeaderCommit; i++)
+        try 
         {
-            try
+            // 2. Read Raw Bytes
+            byte[] entryBytes = await _raftLog.ReadAsync(index);
+            
+            // 3. Deserialize (We need a wrapper for Term + Command)
+            LogEntry entry = DeserializeLogEntry(entryBytes);
+
+            // 4. Update the "Brain"
+            if (entry.Command != null)
             {
-                byte[] entryBytes = await _raftLog.ReadAsync(i);
-                LogEntry entry = DeserializeLogEntry(entryBytes);
-                await _clusterState.ApplyCommand(entry.Command);
+                _clusterState.ApplyCommand(entry.Command);
             }
-            catch (Exception ex)
+            
+            // 5. Update Local State logic
+            if (entry.Term > this.CurrentTerm)
             {
-                _logger.LogError($"Failed to replay log entry {i}: {ex.Message}");
-                break;
+                this.CurrentTerm = entry.Term;
             }
         }
-        _lastApplied = LeaderCommit;
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to replay log at index {index}: {ex.Message}");
+            
+        }
+    }
+
+    // Sync our "Applied" counter to the end of the log
+    _logger.LogInformation($"Replay complete. Last Applied Index: {_lastApplied}");
+}
+
+    public List<Broker> GetBrokerList()
+    {
+        return _clusterMembers;
+    }
+
+    public async Task<(byte[] data, int count)> GetSerializedTopicMetadataAsync(string topic)
+    {
+        return await _clusterState.GetSerializedTopicMetadataAsync(topic);
+    }
+
+    public async Task<(byte[] data, int count)> GetSerializedBrokersAsync()
+    {
+        return await _clusterState.GetSerializedBrokersAsync();
     }
 
 
-    // // Add query methods
-    // public TopicData? GetTopic(string name) => _clusterState.GetTopic(name);
-    // public List<Broker> GetAllBrokers() => _clusterState.GetAllBrokers();
-    // public long GetConsumerOffset(string group, string topic, int partition) 
-    //     => _clusterState.OffsetManager.GetOffset(group, topic, partition);
+
+
+    // TODO
+    // Add GetSerialized Brokers
+    // Create GRPC Loop for receiivng cmds
+    // ADD client SDK
+    // TEST TEST TEST
+
 
 
 }

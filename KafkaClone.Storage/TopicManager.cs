@@ -19,8 +19,6 @@ public class TopicManager
 
     private readonly ILoggerFactory _loggerFactory;
 
-    private Dictionary<string, int> _roundRobinCounters;
-
     private Dictionary<string,TopicState> _topicStates;
 
     private int _defaultPartitions = 3;
@@ -30,7 +28,6 @@ public class TopicManager
         _basePath = basePath;
         _loggerFactory = loggerFactory;
         _topics = new Dictionary<string, List<Partition>>();
-        _roundRobinCounters = new Dictionary<string, int>();
         _topicStates = new Dictionary<string, TopicState>();
         _defaultPartitions = defaultPartitions;
 
@@ -49,18 +46,12 @@ public class TopicManager
     }
 
 
-    public async Task CreateTopic(string topic, int partitionCount,bool autoFlush,int maxFileSize, TimeSpan timeSpan, List<Broker> brokers)
+    public async Task CreateTopic(string topic, int[] partitionIds,bool autoFlush,int maxFileSize, TimeSpan timeSpan)
     {
         // 1. Safety Check: Don't overwrite existing topics
         if (_topics.ContainsKey(topic) || Directory.Exists(Path.Combine(_basePath, topic)))
         {
             Console.WriteLine($"Topic '{topic}' already exists. Skipping creation.");
-            return;
-        }
-
-        if (brokers.Count < 1)
-        {
-            Console.WriteLine("Broker list is empty");
             return;
         }
 
@@ -70,7 +61,7 @@ public class TopicManager
         ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
         List<Partition> newPartitions = new List<Partition>();
 
-        int brokerCount = brokers.Count;
+        int count = partitionIds.Length;
 
         TopicData tpd = new TopicData
             {
@@ -81,22 +72,15 @@ public class TopicManager
             };
 
         // 3. Create the specific number of partitions requested, save the state
-        for (int i = 0; i < partitionCount; i++)
+        for (int i = 0; i < count; i++)
         {
-            string newFolder = Path.Combine(_basePath, topic, $"{topic}-{i}");
+            string newFolder = Path.Combine(_basePath, topic, $"{topic}-{partitionIds[i]}");
 
-            int brokerId = brokers[i % brokerCount].Id;
-
-            Partition newPartition = new Partition(i,newFolder,brokerId, autoFlush, partitionLogger, timeSpan, maxFileSize);
+            Partition newPartition = new Partition(i,newFolder,autoFlush, partitionLogger, timeSpan, maxFileSize);
             newPartitions.Add(newPartition);
 
-            PartitionMetadata ptmtd = new PartitionMetadata()
-            {
-                PartitionId = i,
-                BrokerId = brokerId,
-            };
 
-            tpd.PartitionMetadata.Add(ptmtd);
+            tpd.PartitionIds.Add(partitionIds[i]);
 
         }
 
@@ -107,13 +91,11 @@ public class TopicManager
         // 4. Register it in memory
         _topicStates[topic] = ts;
         _topics[topic] = newPartitions;
-        _roundRobinCounters[topic] = 0;
 
-
-        Console.WriteLine($"Created topic '{topic}' with {partitionCount} partitions.");
+        Console.WriteLine($"Created topic '{topic}' with {count} partitions.");
     }
 
-    public Partition GetTopicPartitionById(string topic, int partitionId = -1)
+    public Partition GetTopicPartitionById(string topic, int partitionId)
     {
         // Ensure valid param
         if (string.IsNullOrEmpty(topic)) return null;
@@ -121,30 +103,10 @@ public class TopicManager
         // If topic exists return logSegment right away based on provided index if any
         if (_topics.TryGetValue(topic, out var partitions))
         {
-            if (partitionId < 0)
-                return RoundRobinPartition(topic, partitions);
-
-            if (partitionId <= partitions.Count - 1)
                 return partitions[partitionId];
         }
-
         return null;
     }
-
-    private Partition RoundRobinPartition(string topic, List<Partition> partitions)
-    {
-
-        if (partitions.Count() == 1) return partitions[0];
-
-        _roundRobinCounters.TryGetValue(topic, out var current);
-
-        int next = (current + 1) % partitions.Count();
-
-        _roundRobinCounters[topic] = next;
-
-        return partitions[next];
-    }
-
 
     private async Task LoadTopics()
     {
@@ -176,12 +138,11 @@ public class TopicManager
 
             _topicStates[topic] = ts;
 
-            foreach(var pmtda in ts.TopicData.PartitionMetadata ){
+            foreach(var id in ts.TopicData.PartitionIds ){
 
             ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
 
-            int partitionId = pmtda.PartitionId;
-            int brokerId = pmtda.BrokerId;
+            int partitionId = id;
             bool autoFlush = ts.TopicData.AutoFlush;
             TimeSpan timeSpan = ts.TopicData.TimeSpan;
             int maxFileSize = ts.TopicData.MaxFileSize;
@@ -189,7 +150,7 @@ public class TopicManager
 
             string partitionPath = Path.Combine(topicPath,$"{topic}-{partitionId}");
 
-            Partition newPartition = new Partition(partitionId,partitionPath,brokerId, autoFlush, partitionLogger, timeSpan, maxFileSize);
+            Partition newPartition = new Partition(partitionId,partitionPath,autoFlush, partitionLogger, timeSpan, maxFileSize);
             newPartitions.Add(newPartition);
 
             }

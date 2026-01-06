@@ -188,7 +188,6 @@ public static class RaftMapper
         {
             "CreateTopic" => JsonSerializer.Deserialize<CreateTopic>(data)!,
             "RegisterBroker" => JsonSerializer.Deserialize<RegisterBroker>(data)!,
-            "ConsumerOffset" => JsonSerializer.Deserialize<ConsumerOffset>(data)!,
             _ => throw new Exception($"Unknown command type: {type}")
         };
     }

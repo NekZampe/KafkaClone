@@ -20,6 +20,9 @@ namespace KafkaClone.Server.DTOs
         public string CommandType => "CreateTopic";
         public string Name { get; set; }
         public int Partitions { get; set; }
+
+        public Dictionary<int, int> Assignments { get; set; } = new(); 
+
     }
 
     // 4. Register Broker
@@ -29,17 +32,6 @@ namespace KafkaClone.Server.DTOs
         public int Id { get; set; }
         public string Host { get; set; }
         public int Port { get; set; }
-    }
-
-    // 7. Consumer Data
-        public class ConsumerOffset : IClusterCommand
-    {
-        public string CommandType => "ConsumerOffset";
-        public string Group { get; set; }
-        public string TopicName { get; set; }
-        public int PartitionId {get;set;}
-        public long Offset {get;set;}
-
     }
 
     //-------------------------------- FORWARD COMMAND RESPONSE ----------------------------

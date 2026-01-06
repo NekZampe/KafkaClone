@@ -53,31 +53,5 @@ message CommandProto {
 message ForwardCommandResponseProto {
   bool success = 1;
   string error_message = 2;
+
 }
-
-// Alternative: Strongly-typed commands (uncomment if you want type safety)
-// message CommandProto {
-//   oneof command_type {
-//     CreateTopicProto create_topic = 1;
-//     RegisterBrokerProto register_broker = 2;
-//     ConsumerOffsetProto consumer_offset = 3;
-//   }
-// }
-
-// message CreateTopicProto {
-//   string name = 1;
-//   int32 partitions = 2;
-// }
-
-// message RegisterBrokerProto {
-//   int32 id = 1;
-//   string host = 2;
-//   int32 port = 3;
-// }
-
-// message ConsumerOffsetProto {
-//   string group = 1;
-//   string topic_name = 2;
-//   int32 partition_id = 3;
-//   int64 offset = 4;
-// }

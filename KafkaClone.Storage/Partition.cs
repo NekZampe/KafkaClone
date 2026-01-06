@@ -9,7 +9,6 @@ public class Partition : IDisposable
     public int Id;
     private readonly string _directoryPath;
     private readonly ILoggerFactory _loggerFactory;
-    public int BrokerId { get; set; }
     private FileStream _fileStream;
     private FileStream _indexStream;
     private readonly int _maxFileSize;
@@ -28,8 +27,7 @@ public class Partition : IDisposable
 
     public long CurrentOffset => _activeBaseOffset + (IndexLength / 8 );
 
-
-    public Partition(int id,string directoryPath,int brokerId, bool autoFlush, ILogger<Partition> logger, TimeSpan timeSpan,int maxFileSize = 1024)
+    public Partition(int id,string directoryPath,bool autoFlush, ILogger<Partition> logger, TimeSpan timeSpan,int maxFileSize = 1024)
     {
          Id = id;
 
@@ -42,8 +40,6 @@ public class Partition : IDisposable
         _directoryPath = directoryPath;
 
         _offsets = new SortedDictionary<long, string>();
-
-        BrokerId = brokerId;
 
         _maxFileSize = maxFileSize;
 

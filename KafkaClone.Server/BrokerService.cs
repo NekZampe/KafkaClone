@@ -8,11 +8,16 @@ namespace KafkaClone.Service;
 
 public class BrokerService
 {
-    private readonly RaftNode _raftNode;
-    private readonly TopicManager _topicManager;
-    private readonly OffsetManager _offsetManager;
-    private readonly Broker _myIdentity;
+    private readonly Broker _myIdentity;  // Services Broker Identity
+    private readonly RaftNode _raftNode; // Raftnode for Consensus
+    private readonly TopicManager _topicManager; // Manages Topics
+    private readonly OffsetManager _offsetManager; // Manages Offsets
     private readonly ILogger<BrokerService> _logger;
+
+    private Object _lock;
+
+    private Task? _applyLoopTask;
+    private CancellationTokenSource _cts;
 
     // This service is a Singleton that lives for the life of the application
     public BrokerService(
@@ -29,43 +34,111 @@ public class BrokerService
         _logger = logger;
     }
 
+     public void Start()
+    {
+        _cts = new CancellationTokenSource();
+        _applyLoopTask = Task.Run(() => ApplyLoop(_cts.Token));
+    }
+    
+    public async Task Stop()
+    {
+        _cts?.Cancel();
+        if (_applyLoopTask != null)
+        {
+            await _applyLoopTask;
+        }
+    }
+    
+    // Background loop that applies committed entries
+    private async Task ApplyLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                // Check if there are committed entries to apply
+                long commitIndex = _raftNode.LeaderCommit;
+                long lastApplied = _raftNode.LastApplied;
+                
+                if (commitIndex > lastApplied)
+                {
+                    List<LogEntry> entries = await _raftNode.GetLogEntries(lastApplied,commitIndex);
+                    // Apply all committed but not yet applied entries
+                    foreach(var entry in entries)
+                    {
+                        var cmd = entry.Command;
+                        await ApplyLogEntry(entry);
+                        await _raftNode.UpdateLastApplied(entry.Index);
+                    }
+                }
+                
+                // Sleep briefly before checking again
+                await Task.Delay(10, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in apply loop");
+                await Task.Delay(100, ct); // Back off on error
+            }
+        }
+    }
+    
+    // Apply a single log entry to the state machine
+    private async Task ApplyLogEntry(LogEntry entry)
+    {
+        var command = entry.Command;
+
+        await HandleCommand(command);
+    }
+    
+     private async Task HandleCommand(IClusterCommand command)
+    {
+        lock (_lock) { /* Update _topics/_brokers dictionaries */ }
+
+        // Trigger Physical Side Effects
+        switch (command)
+        {
+            case CreateTopic cmd:
+                 
+                 await CreateTopicAsync(cmd);
+                 break;
+                 
+        } 
+    }
+
     // =========================================================
     //  Control Plane (Admin Operations -> Goes to Raft)
     // =========================================================
 
-    // Create Topic
-    // Fetch Cluster MetaData ( who has what )
-    // Commit Consumer Group Offset
-    // Fetch Consumer Group Offset
-
-    public async Task<bool> CreateTopicAsync(string topicName, int partitions)
+    public async Task<ForwardCommandResponse> CreateTopicAsync(CreateTopic cmd)
     {
         // 1. Validate input
-        if (partitions <= 0) return false;
-
-        // 2. Create the command
-        var command = new CreateTopic
+        if (cmd.Partitions <= 0) return new ForwardCommandResponse
         {
-            Name = topicName,
-            Partitions = partitions
+            Success = false,
+            ErrorMessage = $"Not enough Partitions"
         };
 
         // 3. Propose to Raft (The ClusterState will handle the logic)
-        var result = await _raftNode.Propose(command);
+        var result = await _raftNode.Propose(cmd);
 
-        return result.Success;
+         if ( result.Success){   
+            return new ForwardCommandResponse
+            {
+                Success = true,
+                ErrorMessage = null
+            };
+         }
+        else return new ForwardCommandResponse
+        {
+            Success = false,
+            ErrorMessage = $"Error creating Topic: {cmd.Name}"
+        };
     }
-
-    public async Task<> FetchClusterMetaData
-
-
-
-
-
-
-
-
-
 
     // =========================================================
     //  Data Plane (Straight to Storage)
@@ -103,6 +176,29 @@ public class BrokerService
 
         return response;
         
-        
     }
+
+    public async Task<long> FetchOffset(string group,string topic, int partitionId)
+    {
+        return _offsetManager.GetOffset(group,topic,partitionId);
+    }
+
+    public async Task CommitGroupOffset(string group,string topic,int partitionId,long offset)
+    {
+        await _offsetManager.CommitOffset(group, topic, partitionId, offset);
+    }
+
+
+    public async Task<(byte[] data, int count)> GetTopicMetadata(string topic)
+    {
+        return await _raftNode.GetSerializedTopicMetadataAsync(topic);
+    }
+
+    public async Task<(byte[] data, int count)> GetBrokerMetadata()
+    {
+        return await _raftNode.GetSerializedBrokersAsync();
+    }
+
+
+
 }
