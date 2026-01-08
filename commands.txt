@@ -15,3 +15,8 @@ dotnet add KafkaClone.Playground/KafkaClone.Playground.csproj reference KafkaClo
 
 
 dotnet add KafkaClone.Storage/KafkaClone.Storage.csproj reference KafkaClone.Shared/KafkaClone.Shared.csproj
+
+
+dotnet run 0 localhost 9092 6000
+dotnet run 1 localhost 9093 6001
+dotnet run 2 localhost 9094 6002
