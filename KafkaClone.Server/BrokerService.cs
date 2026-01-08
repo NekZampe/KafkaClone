@@ -14,7 +14,7 @@ public class BrokerService
     private readonly OffsetManager _offsetManager; // Manages Offsets
     private readonly ILogger<BrokerService> _logger;
 
-    private Object _lock;
+    private Object _lock = new object();
 
     private Task? _applyLoopTask;
     private CancellationTokenSource _cts;
@@ -49,7 +49,9 @@ public class BrokerService
         }
     }
     
-    // Background loop that applies committed entries
+    // =========================================================
+    // APPLY LOOP (State Machine - Applies Committed Entries)
+    // =========================================================
     private async Task ApplyLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -95,18 +97,34 @@ public class BrokerService
         await HandleCommand(command);
     }
     
-     private async Task HandleCommand(IClusterCommand command)
+private async Task HandleCommand(IClusterCommand command)
     {
-        lock (_lock) { /* Update _topics/_brokers dictionaries */ }
-
-        // Trigger Physical Side Effects
         switch (command)
         {
             case CreateTopic cmd:
-                 
-                 await CreateTopicAsync(cmd);
-                 break;
-                 
+            {
+                // Get metadata that ClusterState already has
+                var metadata = await _raftNode.GetListOfPartitionIdsByTopicAndBroker(cmd.Name,_myIdentity.Id);
+                
+                if (metadata.Count() < 0)
+                {
+                    _logger.LogWarning($"Topic {cmd.Name} not found in ClusterState!");
+                    return;
+                }
+                        
+                await _topicManager.CreateTopic(cmd.Name,metadata,false,1024,TimeSpan.FromMinutes(20));
+                break;
+            }
+            
+            case RegisterBroker cmd:
+            {
+                _logger.LogInformation($" Broker {cmd.Id} joined cluster");
+                break;
+            }
+            
+            default:
+                _logger.LogWarning($"Unknown command type: {command.CommandType}");
+                break;
         } 
     }
 
@@ -114,7 +132,7 @@ public class BrokerService
     //  Control Plane (Admin Operations -> Goes to Raft)
     // =========================================================
 
-    public async Task<ForwardCommandResponse> CreateTopicAsync(CreateTopic cmd)
+     public async Task<ForwardCommandResponse> HandleCreateTopicAsync(CreateTopic cmd)
     {
         // 1. Validate input
         if (cmd.Partitions <= 0) return new ForwardCommandResponse
@@ -140,11 +158,53 @@ public class BrokerService
         };
     }
 
+        public async Task<ForwardCommandResponse> HandleRegisterBrokerAsync(RegisterBroker cmd)
+    {
+
+        // 3. Propose to Raft (The ClusterState will handle the logic)
+        var result = await _raftNode.Propose(cmd);
+
+         if ( result.Success){   
+            return new ForwardCommandResponse
+            {
+                Success = true,
+                ErrorMessage = null
+            };
+         }
+        else return new ForwardCommandResponse
+        {
+            Success = false,
+            ErrorMessage = $"Error Registering Broker: {cmd.Id}"
+        };
+    }
+
+    // =========================================================
+    // RAFT RPC HANDLERS (Called by RaftGrpcService)
+    // =========================================================
+
+    public async Task<RequestVoteResponse> HandleRequestVote(RequestVoteRequest request)
+    {
+        // Just pass through to RaftNode
+        return await _raftNode.HandleRequestVote(request);
+    }
+
+    public async Task<AppendEntriesResponse> HandleAppendEntries(AppendEntriesRequest request)
+    {
+        // Just pass through to RaftNode
+        return await _raftNode.HandleAppendEntries(request);
+    }
+
+    // Generic Handler
+    public async Task<ForwardCommandResponse> HandleForwardCommand(IClusterCommand command)
+    {
+        return await _raftNode.Propose(command);
+    }
+
     // =========================================================
     //  Data Plane (Straight to Storage)
     // =========================================================
 
-    public async Task ProducAsync(string topicName,int partitionId, byte[] payload)
+     public async Task HandleProduceAsync(string topicName,int partitionId, byte[] payload)
     {
         // 1. Get the physical partition
         var partition = _topicManager.GetTopicPartitionById(topicName, partitionId);
@@ -153,13 +213,13 @@ public class BrokerService
 
     }
 
-    public async Task BatchProduceAsync(string topicName,int partitionId,List<byte[]> payloads)
+    public async Task HandleBatchProduceAsync(string topicName,int partitionId,List<byte[]> payloads)
     {
         var partition = _topicManager.GetTopicPartitionById(topicName, partitionId);
         await partition.AppendBatchAsync(payloads);
     }
 
-    public async Task<byte[]> ConsumeAsync(string topicName,int partitionId,long offset)
+    public async Task<byte[]> HandleConsumeAsync(string topicName,int partitionId,long offset)
     {
         var partition = _topicManager.GetTopicPartitionById(topicName, partitionId);
 
@@ -168,7 +228,7 @@ public class BrokerService
         return messageData;
     }
 
-    public async Task<(List<byte[]> messages, long nextOffset)> BatchConsumeAsync(string topicName,int partitionId, long offset, int count)
+    public async Task<(List<byte[]> messages, long nextOffset)> HandleBatchConsumeAsync(string topicName,int partitionId, long offset, int count)
     {
         var partition = _topicManager.GetTopicPartitionById(topicName, partitionId);
 
@@ -178,23 +238,23 @@ public class BrokerService
         
     }
 
-    public async Task<long> FetchOffset(string group,string topic, int partitionId)
+    public async Task<long> HandleFetchOffset(string group,string topic, int partitionId)
     {
         return _offsetManager.GetOffset(group,topic,partitionId);
     }
 
-    public async Task CommitGroupOffset(string group,string topic,int partitionId,long offset)
+    public async Task HandleCommitGroupOffset(string group,string topic,int partitionId,long offset)
     {
         await _offsetManager.CommitOffset(group, topic, partitionId, offset);
     }
 
-
-    public async Task<(byte[] data, int count)> GetTopicMetadata(string topic)
+    
+    public async Task<(byte[] data, int count)> HandleGetSerializedTopicMetadata(string topic)
     {
         return await _raftNode.GetSerializedTopicMetadataAsync(topic);
     }
 
-    public async Task<(byte[] data, int count)> GetBrokerMetadata()
+    public async Task<(byte[] data, int count)> HandleGetSerializedBrokerMetadata()
     {
         return await _raftNode.GetSerializedBrokersAsync();
     }

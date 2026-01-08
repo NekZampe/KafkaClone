@@ -17,12 +17,9 @@ public class GrpcRaftTransport : IRaftTransport
     {
         foreach (var member in clusterMembers)
         {
-
-            var address = $"http://{member.Host}:{member.Port.ToString()}";
-            // 1. Create a channel to the broker's address (e.g., "http://192.168.1.10:5000")
+            // FIX: Use GrpcPort instead of Port
+            var address = $"http://{member.Host}:{member.GrpcPort}";
             var channel = GrpcChannel.ForAddress(address);
-            
-            // 2. Create the specialized Raft client (the "stub")
             var client = new RaftService.RaftServiceClient(channel);
             
             _channels.Add(channel);

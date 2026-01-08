@@ -108,63 +108,90 @@ public class TopicManager
         return null;
     }
 
-    private async Task LoadTopics()
+private async Task LoadTopics()
+{
+    if (!Directory.Exists(_basePath)) 
+        Directory.CreateDirectory(_basePath);
+
+    string[] drs = Directory.GetDirectories(_basePath);
+    
+    // Filter out system directories (Raft logs, etc.)
+    List<string> topicNames = new List<string>();
+    
+    foreach(var dr in drs)
     {
-
-        if (!Directory.Exists(_basePath)) Directory.CreateDirectory(_basePath);
-
-        string[] drs = Directory.GetDirectories(_basePath);
-        List<string> paths = new List<string>(drs.Length);
-
-        foreach(var dr in drs)
+        string dirName = Path.GetFileName(dr);
+        
+        // Skip system directories (starting with __)
+        if (dirName.StartsWith("__"))
         {
-            paths.Add(Path.GetFileName(dr));
+            Console.WriteLine($"[TopicManager] Skipping system directory: {dirName}");
+            continue;
+        }
+        
+        topicNames.Add(dirName);
+    }
+
+    foreach(var topic in topicNames)
+    {
+        string topicPath = Path.Combine(_basePath, topic);
+        string statePath = Path.Combine(topicPath, "state.json");
+
+        // Skip if state.json doesn't exist (corrupted or incomplete topic)
+        if(!File.Exists(statePath))
+        {
+            Console.WriteLine($"[TopicManager] Skipping {topic} - no state.json found");
+            continue;
         }
 
-        foreach( var topic in paths )
+        try
         {
-            
-            string topicPath = Path.Combine(_basePath,topic);
-            string statePath = Path.Combine(topicPath,"state.json");
-
-            if(!File.Exists(statePath))
-                throw new FileNotFoundException($"Cannot find `state.json` file for {topic}");
-
             TopicState ts = await TopicState.LoadAsync(topicPath);
 
-            if (ts is null) continue;
+            if (ts is null)
+            {
+                Console.WriteLine($"[TopicManager] Failed to load state for {topic}");
+                continue;
+            }
 
             List<Partition> newPartitions = new List<Partition>();
-
             _topicStates[topic] = ts;
 
-            foreach(var id in ts.TopicData.PartitionIds ){
+            foreach(var id in ts.TopicData.PartitionIds)
+            {
+                ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
 
-            ILogger<Partition> partitionLogger = _loggerFactory.CreateLogger<Partition>();
+                int partitionId = id;
+                bool autoFlush = ts.TopicData.AutoFlush;
+                TimeSpan timeSpan = ts.TopicData.TimeSpan;
+                int maxFileSize = ts.TopicData.MaxFileSize;
 
-            int partitionId = id;
-            bool autoFlush = ts.TopicData.AutoFlush;
-            TimeSpan timeSpan = ts.TopicData.TimeSpan;
-            int maxFileSize = ts.TopicData.MaxFileSize;
+                string partitionPath = Path.Combine(topicPath, $"{topic}-{partitionId}");
 
-
-            string partitionPath = Path.Combine(topicPath,$"{topic}-{partitionId}");
-
-            Partition newPartition = new Partition(partitionId,partitionPath,autoFlush, partitionLogger, timeSpan, maxFileSize);
-            newPartitions.Add(newPartition);
-
+                Partition newPartition = new Partition(
+                    partitionId, 
+                    partitionPath, 
+                    autoFlush, 
+                    partitionLogger, 
+                    timeSpan, 
+                    maxFileSize);
+                    
+                newPartitions.Add(newPartition);
             }
 
             _topics[topic] = newPartitions;
-
-            }
-
-
+            Console.WriteLine($"[TopicManager] Loaded topic '{topic}' with {newPartitions.Count} partitions");
         }
-
-
-        
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TopicManager] Error loading topic {topic}: {ex.Message}");
+        }
     }
+
+    Console.WriteLine($"[TopicManager] Loaded {_topics.Count} topics total");
+}
+
+}
 
 
 

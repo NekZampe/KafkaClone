@@ -32,6 +32,7 @@ namespace KafkaClone.Server.DTOs
         public int Id { get; set; }
         public string Host { get; set; }
         public int Port { get; set; }
+        public int GrpcPort { get; set; }
     }
 
     //-------------------------------- FORWARD COMMAND RESPONSE ----------------------------

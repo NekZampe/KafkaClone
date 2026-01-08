@@ -82,7 +82,7 @@ public class ClusterState
                     // Update our list of alive brokers
                     if (!_brokers.ContainsKey(cmd.Id))
                     {
-                        _brokers[cmd.Id] = new Broker(cmd.Id, cmd.Port, cmd.Host);
+                        _brokers[cmd.Id] = new Broker(cmd.Id, cmd.Port, cmd.GrpcPort, cmd.Host);
                         Console.WriteLine($"[ClusterState] Registered Broker {cmd.Id}");
                         return true;
                     }
@@ -209,6 +209,28 @@ public async Task<(byte[], int)> GetSerializedTopicMetadataAsync(string topicNam
     {
         public Dictionary<string, TopicMetaData> Topics { get; set; }
         public Dictionary<int, Broker> Brokers { get; set; }
+    }
+
+    // Return all relevant partitionIds for a given topic based on broker Id
+    public async Task<int[]> GetListofTopicPartitionsByBrokerId(string topic, int brokerId)
+    {
+        List<int> partitionIds = new List<int>();
+
+        lock (_lock)
+        {
+            if (_topicMap.TryGetValue(topic, out var data))
+            {
+                foreach (var partition in data.PartitionMetadata)
+                {
+                    if (partition.BrokerId == brokerId)
+                    {
+                        partitionIds.Add(partition.PartitionId);
+                    }
+                }
+            }
+        }
+
+        return partitionIds.ToArray();
     }
 
 }

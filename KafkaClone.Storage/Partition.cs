@@ -98,10 +98,18 @@ public class Partition : IDisposable
         string fullIndexPath = Path.Combine(_directoryPath, nameWithoutExtension + ".index");
 
 
-        _fileStream = new FileStream(fullLogPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        _fileStream = new FileStream(
+        fullLogPath, 
+        FileMode.OpenOrCreate, 
+        FileAccess.ReadWrite, 
+        FileShare.ReadWrite);
         _fileStream.Position = _fileStream.Length;
 
-        _indexStream = new FileStream(fullIndexPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        _indexStream = new FileStream(
+        fullIndexPath, 
+        FileMode.OpenOrCreate, 
+        FileAccess.ReadWrite, 
+        FileShare.ReadWrite);
         _indexStream.Position = _indexStream.Length;
 
     }
@@ -263,11 +271,17 @@ public class Partition : IDisposable
 
         // 4. Open a TEMPORARY stream just for this read
         // We use "using" so it closes automatically
-        using (FileStream tempIndex = File.OpenRead(indexName))
-        {
+        using (FileStream tempIndex = new FileStream(
+                            indexName, 
+                            FileMode.Open, 
+                            FileAccess.Read, 
+                            FileShare.ReadWrite))
+                {
             // Safety Check
-            if (indexPosition >= tempIndex.Length)
-                throw new IndexOutOfRangeException("Message not found");
+            if (indexPosition >= tempIndex.Length){
+                _logger.LogWarning($"Offset {offset} not found in index (position {indexPosition} >= length {tempIndex.Length})");
+                throw new IndexOutOfRangeException($"Message at offset {offset} not found");
+            }
 
             tempIndex.Position = indexPosition;
 
@@ -276,8 +290,12 @@ public class Partition : IDisposable
             long logPosition = BitConverter.ToInt64(indexBuffer, 0);
 
             // 5. Open the Log File to get the data
-            using (FileStream tempLog = File.OpenRead(logName))
-            {
+        using (FileStream tempLog = new FileStream(
+                    logName, 
+                    FileMode.Open, 
+                    FileAccess.Read, 
+                    FileShare.ReadWrite))
+                {
                 tempLog.Position = logPosition;
 
                 // Read Length
@@ -333,9 +351,17 @@ public class Partition : IDisposable
             int i = 0;
 
             // 1. Open the CURRENT file (whatever 'indexName' is set to right now)
-            using (FileStream tempIndex = File.OpenRead(indexName))
-            using (FileStream tempLog = File.OpenRead(logName))
-            {
+            using (FileStream tempIndex = new FileStream(
+                indexName, 
+                FileMode.Open, 
+                FileAccess.Read, 
+                FileShare.ReadWrite))  
+            using (FileStream tempLog = new FileStream(
+                logName, 
+                FileMode.Open, 
+                FileAccess.Read, 
+                FileShare.ReadWrite)) 
+        {
                 {
                     while (readResults.Count < maxCount)
                     {

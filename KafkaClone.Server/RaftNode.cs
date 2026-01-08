@@ -80,6 +80,7 @@ public class RaftNode
         this.LastLogTerm = nodeData.LastTerm;
         this.LeaderCommit = nodeData.LeaderCommit;
         this.VotedFor = nodeData.VotedFor;
+        
 
     }
 
@@ -88,9 +89,10 @@ public class RaftNode
         Broker identity,
         ILogger<Partition> partitionLogger, 
         IRaftTransport raftTransport,
-        ClusterState clusterState)
+        ClusterState clusterState,
+        List<Broker> bootstrapClusterMembers)
     {
-        var clusterMembers = clusterState.GetAllBrokers();
+        var clusterMembers = bootstrapClusterMembers;
         RaftNodeState raftNodeState;
         string statePath = Path.Combine(basePath, "nodestate.json");
 
@@ -116,7 +118,10 @@ public class RaftNode
             Partition partition = new Partition(0,newFolder, false, partitionLogger, TimeSpan.FromHours(5), 1024);
 
             
-            return new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData,clusterState);
+            var raftNode = new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData,clusterState);
+             _ = raftNode.ResetElectionTimer();
+        
+            return raftNode;
         }
             else
             {
@@ -150,6 +155,8 @@ public class RaftNode
 
                 await raftNode.ReplayLog();
 
+                 _ = raftNode.ResetElectionTimer();
+        
                 return raftNode;
             }
         
@@ -258,6 +265,8 @@ public class RaftNode
         State = NodeState.Leader;
         CurrentLeaderId = _myIdentity.Id;
 
+        _logger.LogInformation($"[RAFT] Broker {_myIdentity.Id} elected as LEADER for term {CurrentTerm}");
+
         _nextIndex = new Dictionary<int, long>();
         _matchIndex = new Dictionary<int, long>();
 
@@ -276,6 +285,7 @@ public class RaftNode
     {
         while (!ct.IsCancellationRequested && State == NodeState.Leader)
         {
+            _logger.LogDebug($"[RAFT] {_myIdentity.Id} Sending HeartBeats...");
             await SendHeartbeats();
             await Task.Delay(50, ct); // Heartbeat interval (e.g., 50ms)
         }
@@ -357,6 +367,7 @@ private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broke
     // 1. Follower's term is higher so we step down
     if (response.Term > CurrentTerm)
     {
+         _logger.LogInformation($"[RAFT] Broker {_myIdentity.Id} stepping down for term {CurrentTerm}");
         await BecomeFollower(response.Term);
         return; // Stop processing after stepping down
     }
@@ -470,7 +481,7 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
     }
 
 
-    private async Task<RequestVoteResponse> HandleRequestVote(RequestVoteRequest request)
+    public async Task<RequestVoteResponse> HandleRequestVote(RequestVoteRequest request)
     {   
         // 1. Term Update Rule: If candidate's term is higher, update state and step down.
         if(request.ElectionTerm > CurrentTerm)
@@ -543,9 +554,12 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
 
         await ResetElectionTimer();
 
+        if (request.PrevLogIndex > 0)
+{
         // 3. Reply false if log doesn’t contain PrevLogIndex
         if (request.PrevLogIndex > LastLogIndex)
         {
+             _logger.LogWarning($"PrevLogIndex {request.PrevLogIndex} is beyond our log (LastLogIndex: {LastLogIndex})");
             return new AppendEntriesResponse
             {
                 Success = false,
@@ -554,14 +568,32 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
             };
         }
 
-        // 4. Reply false if term mismatch at PrevLogIndex
-        if (request.PrevLogIndex >= 0)
-        {
-            byte[] anchorBytes = await _raftLog.ReadAsync(request.PrevLogIndex);
-            LogEntry anchorEntry = DeserializeLogEntry(anchorBytes);
-
-            if (anchorEntry.Term != request.PrevLogTerm)
+        try
             {
+                byte[] anchorBytes = await _raftLog.ReadAsync(request.PrevLogIndex);
+                LogEntry anchorEntry = DeserializeLogEntry(anchorBytes);
+
+                if(anchorEntry is null) return new AppendEntriesResponse
+                {
+                    Success = false,
+                    Term = CurrentTerm,
+                    LastLogIndex = LastLogIndex
+                };
+
+                if (anchorEntry.Term != request.PrevLogTerm)
+                {
+                    _logger.LogWarning($"Term mismatch at PrevLogIndex {request.PrevLogIndex}");
+                    return new AppendEntriesResponse
+                    {
+                        Success = false,
+                        Term = CurrentTerm,
+                        LastLogIndex = LastLogIndex
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error reading log at PrevLogIndex {request.PrevLogIndex}: {ex.Message}");
                 return new AppendEntriesResponse
                 {
                     Success = false,
@@ -569,7 +601,8 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
                     LastLogIndex = LastLogIndex
                 };
             }
-        }
+}
+
 
         // 5. Append / overwrite entries
         for (int i = 0; i < request.Entries.Count; i++)
@@ -608,8 +641,14 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         return JsonSerializer.SerializeToUtf8Bytes(logEntry);
     }
 
-    public LogEntry DeserializeLogEntry(byte[] logEntryBytes)
+    public LogEntry? DeserializeLogEntry(byte[] logEntryBytes)
     {
+        if (logEntryBytes == null || logEntryBytes.Length == 0)
+            return null;
+
+        if (logEntryBytes.Length == 1 && logEntryBytes[0] == 0xFF)
+            return null;
+
         return JsonSerializer.Deserialize<LogEntry>(logEntryBytes) 
             ?? throw new Exception("Failed to deserialize LogEntry.");
     }
@@ -711,6 +750,10 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         return await _clusterState.GetSerializedBrokersAsync();
     }
 
+    public async Task<int[]> GetListOfPartitionIdsByTopicAndBroker(string topic,int brokerId)
+    {
+        return await _clusterState.GetListofTopicPartitionsByBrokerId(topic,brokerId);
+    }
 
 
 

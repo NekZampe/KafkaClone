@@ -135,7 +135,7 @@ public class TcpServerService : BackgroundService
         await stream.ReadExactlyAsync(payload, 0, size);
 
         // 5. Save
-        await _brokerService.ProducAsync(topicName,partitionId,payload);
+        await _brokerService.HandleProduceAsync(topicName,partitionId,payload);
                                 
         _logger.LogDebug($"[Produce] Written {size} bytes to {topicName}-{partitionId}");
     }
@@ -181,7 +181,7 @@ private async Task HandleBatchProduce(NetworkStream stream, CancellationToken ct
             cache.Add(payload);
         }
         
-        await _brokerService.BatchProduceAsync(topicName,partitionId,cache);
+        await _brokerService.HandleBatchProduceAsync(topicName,partitionId,cache);
         
     
     _logger.LogDebug($"[BatchProduce] Written {msgCount} messages to {topicName}-{partitionId}");
@@ -214,7 +214,7 @@ private async Task HandleBatchProduce(NetworkStream stream, CancellationToken ct
 
         try
         {
-            var result = await _brokerService.ConsumeAsync(topicName,partitionId,offset);
+            var result = await _brokerService.HandleConsumeAsync(topicName,partitionId,offset);
             
             // Found it! Send: [NextOffset(8)] [Size(4)] [Data]
             byte[] sizeBytes = BitConverter.GetBytes(result.Length);
@@ -265,7 +265,7 @@ private async Task HandleBatchProduce(NetworkStream stream, CancellationToken ct
 
 
         // 6. Get all messages
-        var result = await _brokerService.BatchConsumeAsync(topicName, partitionId,offset,msgCount);
+        var result = await _brokerService.HandleBatchConsumeAsync(topicName, partitionId,offset,msgCount);
 
         byte[] nextOffsetBytes = BitConverter.GetBytes(result.nextOffset);
 
@@ -321,7 +321,7 @@ private async Task HandleFetchOffset(NetworkStream stream, CancellationToken ct)
     int partitionId = BitConverter.ToInt32(partIdBuf);
 
     // 4. Retrieve
-    long storedOffset = await _brokerService.FetchOffset(group,topic,partitionId);
+    long storedOffset = await _brokerService.HandleFetchOffset(group,topic,partitionId);
 
     // 5. Send back
     await stream.WriteAsync(BitConverter.GetBytes(storedOffset));
@@ -363,7 +363,7 @@ private async Task HandleCommitGroupOffset(NetworkStream stream, CancellationTok
     long offsetToCommit = BitConverter.ToInt64(offsetBuf);
 
     // 5. Save
-    await _brokerService.CommitGroupOffset(group, topic, partitionId, offsetToCommit);
+    await _brokerService.HandleCommitGroupOffset(group, topic, partitionId, offsetToCommit);
 
     _logger.LogDebug($"[Commit] Group '{group}' on '{topic}-{partitionId}' @ {offsetToCommit}");
 }
@@ -380,7 +380,7 @@ private async Task HandleGetTopicMetaData(NetworkStream stream, CancellationToke
     await stream.ReadExactlyAsync(topicBuf, 0, topicLen);
     string topic = Encoding.UTF8.GetString(topicBuf);
 
-    var result = await _brokerService.GetTopicMetadata(topic);
+    var result = await _brokerService.HandleGetSerializedTopicMetadata(topic);
 
     int responseSize = 4 + result.data.Length;
     byte[] responseBuffer = new byte[responseSize];
@@ -408,7 +408,7 @@ private async Task HandleGetBrokerList(NetworkStream stream, CancellationToken c
 {
     // 1. FETCH DATA
     // Returns: (Raw bytes of all brokers, Count of brokers)
-    var (brokerData, brokerCount) = await _brokerService.GetBrokerMetadata();
+    var (brokerData, brokerCount) = await _brokerService.HandleGetSerializedBrokerMetadata();
 
     // 2. CONSTRUCT RESPONSE
     // Size = 4 bytes (for the int Count) + Length of the data blob
