@@ -59,11 +59,12 @@ Data is stored on disk using a paired file strategy:
 ### Running the Cluster
 
 **1. Start the Server**
-The server listens on port `9092` by default. Data is stored in a local `kafka-data` directory.
 
 ```bash
-dotnet run --project KafkaClone.Server
+cd KafkaClone.Server
+dotnet run 0 localhost 9092 6000
 ```
+You will want to run multiple brokers to simulate consensus.
 
 **2. Start the Client (Playground)**
 Open a new terminal window to run the interactive CLI.
@@ -89,7 +90,7 @@ Once the **Playground** client is running, you can interact with the server usin
 | **6** | `6 <topic> <pid> <offset> <count>` | **Batch Consume** | `6 logs 0 0 100` |
 | **TEST** | `test <topic> <count>` | **Run Load Test** | `test logs 10000` |
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License.
 
