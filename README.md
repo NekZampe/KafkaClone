@@ -4,7 +4,7 @@
 
 **KafkaClone** is a lightweight, educational implementation of a distributed event streaming platform, built from scratch in .NET 8. It replicates the core architecture of Apache Kafka, focusing on high-throughput sequential disk I/O, a custom binary protocol, and efficient networking.
 
-## 🌟 Features
+##  Features
 
   * **Custom Binary Protocol:** Hand-rolled TCP protocol using `BinaryPrimitives` and `Span<T>` for low-allocation parsing.
   * **Segmented Log Storage:** Append-only storage engine splitting data into segments (`.log`) for efficient file management.
@@ -15,7 +15,9 @@
 
 -----
 
-## 🏗️ Architecture
+##  Architecture
+
+<img width="553" height="682" alt="image" src="https://github.com/user-attachments/assets/0336f7fa-5aee-449c-af29-6bf24d5ad575" />
 
 The solution is divided into four main projects following Clean Architecture principles:
 
@@ -33,7 +35,7 @@ Data is stored on disk using a paired file strategy:
 
 -----
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -72,7 +74,7 @@ dotnet run --project KafkaClone.Playground
 
 -----
 
-## 🎮 CLI Usage Commands
+## CLI Usage Commands
 
 Once the **Playground** client is running, you can interact with the server using the following command codes:
 
@@ -87,25 +89,7 @@ Once the **Playground** client is running, you can interact with the server usin
 | **6** | `6 <topic> <pid> <offset> <count>` | **Batch Consume** | `6 logs 0 0 100` |
 | **TEST** | `test <topic> <count>` | **Run Load Test** | `test logs 10000` |
 
-
------
-
-## 🗺️ Roadmap
-
-  - [x] TCP Server & Binary Protocol
-  - [x] Segmented Log Storage
-  - [x] Sparse Indexing
-  - [x] Batch Producer/Consumer
-  - [ ] **Cluster Controller & Broker Discovery** (In Progress)
-  - [ ] Partition Replication
-  - [ ] Leader Election ( KRaft ) 
-
------
-
 ## 📄 License
 
 This project is licensed under the MIT License.
-
-
-<img width="553" height="682" alt="image" src="https://github.com/user-attachments/assets/0336f7fa-5aee-449c-af29-6bf24d5ad575" />
 
