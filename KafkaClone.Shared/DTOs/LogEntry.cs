@@ -22,6 +22,10 @@ namespace KafkaClone.Server.DTOs
         public int Partitions { get; set; }
 
         public Dictionary<int, int> Assignments { get; set; } = new(); 
+        public override string ToString()
+        {
+            return $"[CreateTopic] Name={Name}, Partitions={Partitions}, AssgnCount={Assignments?.Count ?? 0}";
+        }
 
     }
 
@@ -33,6 +37,11 @@ namespace KafkaClone.Server.DTOs
         public string Host { get; set; }
         public int Port { get; set; }
         public int GrpcPort { get; set; }
+
+        public override string ToString()
+        {
+            return $"[RegisterBroker] Id={Id}, Addr={Host}:{Port}/{GrpcPort}";
+        }
     }
 
     //-------------------------------- FORWARD COMMAND RESPONSE ----------------------------
@@ -40,6 +49,11 @@ namespace KafkaClone.Server.DTOs
             {
             public bool Success { get; set; }
             public string? ErrorMessage { get; set; }
+
+            public override string ToString()
+        {
+            return Success ? "[ForwardResponse] OK" : $"[ForwardResponse] FAIL: {ErrorMessage}";
+        }
 
             }
 
@@ -50,6 +64,13 @@ namespace KafkaClone.Server.DTOs
         public int Term { get; set; }
         public long Index {get;set;}
         public IClusterCommand Command { get; set; } 
+
+        public override string ToString()
+        {
+            // Helper to get a short description of the command
+            string cmdDesc = Command?.ToString() ?? "null";
+            return $"[LogEntry] Idx={Index}, Term={Term}, Cmd={cmdDesc}";
+        }
     }
 
 

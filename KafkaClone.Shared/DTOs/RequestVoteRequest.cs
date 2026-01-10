@@ -11,5 +11,10 @@ namespace KafkaClone.Server
         public int ElectionTerm {get;set;}
         public long LastLogIndex {get;set;}
         public int LastLogTerm {get;set;}
+
+        public override string ToString()
+        {
+            return $"[RequestVote] Cand={BrokerId}, Term={ElectionTerm}, LastLog={LastLogIndex}(T{LastLogTerm})";
+        }
     }
 }

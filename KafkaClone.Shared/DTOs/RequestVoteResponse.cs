@@ -9,6 +9,11 @@ namespace KafkaClone.Server.DTOs
     {
         public bool Verdict;
         public int CurrentTerm;
+
+        public override string ToString()
+        {
+            return $"[VoteResp] {(Verdict ? "GRANTED" : "DENIED")}, Term={CurrentTerm}";
+        }
         
     }
 }

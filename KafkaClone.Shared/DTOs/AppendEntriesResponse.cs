@@ -11,6 +11,11 @@ namespace KafkaClone.Server.DTOs
         public int Term;
         public long LastLogIndex;
         public long LastLogTerm;
+
+        public override string ToString()
+        {
+            return $"[AppendEntriesResp] Success={Success}, Term={Term}, LastLog={LastLogIndex}";
+        }
         
     }
 }

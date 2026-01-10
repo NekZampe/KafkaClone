@@ -16,4 +16,14 @@ public class AppendEntriesRequest
    // 4. The Payload: The actual log entries to store
     public List<LogEntry> Entries { get; set; } 
 
+    public override string ToString()
+    {
+        int count = Entries?.Count ?? 0;
+        string entriesSummary = count > 0 
+            ? $"(First: {Entries[0].Index})" 
+            : "(empty)";
+            
+        return $"[AppendEntries] Leader={LeaderId}, Term={Term}, Prev={PrevLogIndex}(T{PrevLogTerm}), Commit={LeaderCommit}, Entries={count} {entriesSummary}";
+    }
+
 }

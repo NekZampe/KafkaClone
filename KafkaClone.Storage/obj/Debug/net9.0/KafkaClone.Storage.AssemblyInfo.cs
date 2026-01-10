@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("KafkaClone.Storage")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2ee84cd17b96ecc550f32cc5810477a052cfb02f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dd5f0a4b4ea452b01c7afb45a3748e986b973ebb")]
 [assembly: System.Reflection.AssemblyProductAttribute("KafkaClone.Storage")]
 [assembly: System.Reflection.AssemblyTitleAttribute("KafkaClone.Storage")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

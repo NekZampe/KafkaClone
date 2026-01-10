@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KafkaClone.Server", "KafkaC
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KafkaClone.Shared", "KafkaClone.Shared\KafkaClone.Shared.csproj", "{9626ECA4-5A34-4AB8-B89E-F8589E7653E4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KafkaClone.Tests", "KafkaClone.Tests\KafkaClone.Tests.csproj", "{1DC6DB0F-108F-4738-9708-92C5ADFEA230}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,6 +71,18 @@ Global
 		{9626ECA4-5A34-4AB8-B89E-F8589E7653E4}.Release|x64.Build.0 = Release|Any CPU
 		{9626ECA4-5A34-4AB8-B89E-F8589E7653E4}.Release|x86.ActiveCfg = Release|Any CPU
 		{9626ECA4-5A34-4AB8-B89E-F8589E7653E4}.Release|x86.Build.0 = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|x64.Build.0 = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Debug|x86.Build.0 = Debug|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|x64.ActiveCfg = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|x64.Build.0 = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|x86.ActiveCfg = Release|Any CPU
+		{1DC6DB0F-108F-4738-9708-92C5ADFEA230}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

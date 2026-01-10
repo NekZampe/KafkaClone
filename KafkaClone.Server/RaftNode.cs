@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using System.Collections;
+using System.Security;
 
 namespace KafkaClone.Server;
 
@@ -17,51 +18,67 @@ public enum NodeState
     Leader
 }
 
-public class RaftNode
+public class RaftNode : IDisposable
 {
+    // =========================
+    // CORE IDENTITY & DEPENDENCIES
+    // =========================
     private readonly string _basePath;
     private readonly Broker _myIdentity;
     private readonly ClusterState _clusterState;
     private readonly ILogger<Partition> _logger;
-    
-    // The current state (starts as Follower)
-    public NodeState State { get; private set; } = NodeState.Follower;
+    private IRaftTransport _raftTransport;
+    private readonly Partition _raftLog;
+    public int Id => _myIdentity.Id;
 
-    // We need a list of peers to ask for votes
+    // =========================
+    // RAFT STATE
+    // =========================
+    public NodeState State { get; private set; } = NodeState.Follower;
+    public int? CurrentLeaderId { get; private set; }
+    public int? VotedFor { get; private set; }
+    public int CurrentTerm { get; private set; }
+    public int LastLogTerm;
+    public long LeaderCommit = 0; // Highest index of commited file
+    private volatile bool _disposed = false;
+
+    // =========================
+    // CLUSTER MEMBERSHIP
+    // =========================
     private List<Broker> _clusterMembers;
 
-    public int? CurrentLeaderId { get; private set; }
-
-    public int? VotedFor { get; private set; }
-
-    public int CurrentTerm { get; private set; }
-
-    private const int MinElectionTimeout = 150;
-
-    private const int MaxElectionTimeout = 300;
-
-    private static readonly Random _rng = new Random();
-
-    private int NextRandomNumber => _rng.Next(MinElectionTimeout,MaxElectionTimeout);
-
-    private CancellationTokenSource _electionTimeoutCts;
-
-    private IRaftTransport _raftTransport;
-
-    private readonly Partition _raftLog;
-
+    // =========================
+    // LOG STATE
+    // =========================
     public long LastLogIndex => _raftLog.CurrentOffset;
-
-    public int LastLogTerm;
-
-    public long LeaderCommit = 0; // Highest index of commited file
-
     private long _lastApplied = 0;
     public long LastApplied => _lastApplied;
 
-    private Dictionary<int,long> _nextIndex; // Used to find common anchor
+    // =========================
+    // LEADER REPLICATION STATE
+    // =========================
+    private Dictionary<int,long> _nextIndex;   // Used to find common anchor
+    private Dictionary<int,long> _matchIndex;  // Highest Index of follower commited
 
-    private Dictionary<int,long> _matchIndex; // Highest Index of follower commited
+    // =========================
+    // TIMING & ELECTION
+    // =========================
+    private const int MinElectionTimeout = 1000;
+    private const int MaxElectionTimeout = 2000;
+    private static readonly Random _rng = new Random();
+    private int NextRandomNumber => _rng.Next(MinElectionTimeout,MaxElectionTimeout);
+    private CancellationTokenSource _electionTimeoutCts;
+    private CancellationTokenSource? _leaderStopCts;
+
+    // =========================
+    // CONCURRENCY & DISK SAFETY
+    // =========================
+    private readonly SemaphoreSlim _diskLock = new SemaphoreSlim(1, 1);
+
+
+    // =========================
+    // Initialization
+    // =========================
 
     private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog, RaftNodeData nodeData,ClusterState clusterState)
     {
@@ -72,7 +89,7 @@ public class RaftNode
         _raftTransport = raftTransport;
         _electionTimeoutCts = new CancellationTokenSource();
         _raftLog = raftLog;
-         _clusterState = clusterState;
+        _clusterState = clusterState;
 
         // Apply RaftNodeState data
         this.CurrentTerm = nodeData.CurrentTerm;
@@ -83,6 +100,33 @@ public class RaftNode
         
 
     }
+
+    public void Dispose()
+        {
+            _disposed = true;
+
+            try 
+            {
+                _electionTimeoutCts?.Cancel(); 
+                _leaderStopCts?.Cancel();
+
+                _electionTimeoutCts?.Dispose();
+                _leaderStopCts?.Dispose();
+            } 
+            catch (ObjectDisposedException) { }
+
+            if (_raftLog is IDisposable disposableLog)
+            {
+                disposableLog.Dispose();
+            }
+
+            // 3. Clean up the semaphore
+            _diskLock?.Dispose();
+        }
+
+    // =========================
+    // NODE BOOTSTRAP
+    // =========================
 
     public static async Task<RaftNode> InitializeNode(
         string basePath, 
@@ -162,45 +206,81 @@ public class RaftNode
         
     }
 
-    private async Task PersistStateAsync()
+
+        private async Task ReplayLog()
 {
-    var data = new RaftNodeData
-    {
-        BrokerIdentity = _myIdentity,
-        CurrentTerm = this.CurrentTerm,
-        VotedFor = this.VotedFor,
-        NodeState = this.State,
-        LastTerm = this.CurrentTerm
-    };
+    _logger.LogInformation("Replaying Raft Log to restore Cluster State...");
+    
+     _lastApplied = 0;
 
-    await RaftNodeState.SaveStateAsync(_basePath,data);
-}
-
-    private async Task ResetElectionTimer()
+    // 1. Iterate through the entire log from the beginning
+    long logSize = _raftLog.CurrentOffset; 
+    
+    for (long index = 0; index < logSize; index++)
     {
-        // Cancel old one
-        if (_electionTimeoutCts is not null)
+        try 
         {
-            _electionTimeoutCts.Cancel();
-            _electionTimeoutCts.Dispose();
+            // 2. Read Raw Bytes
+            byte[] entryBytes = await _raftLog.ReadAsync(index);
+            
+            // 3. Deserialize 
+            LogEntry entry = DeserializeLogEntry(entryBytes);
+
+            // 4. Update the "Brain"
+            if (entry.Command != null)
+            {
+                _clusterState.ApplyCommand(entry.Command);
+            }
+            
+            // 5. Update Local State logic
+            if (entry.Term > this.CurrentTerm)
+            {
+                this.CurrentTerm = entry.Term;
+            }
+
+            _lastApplied = index;
         }
-
-        _electionTimeoutCts = new CancellationTokenSource();
-        int timeout = NextRandomNumber;
-
-        _ = Task.Delay(timeout, _electionTimeoutCts.Token).ContinueWith(async t =>
+        catch (Exception ex)
         {
-            if (!t.IsCanceled)
-            {   
-                State = NodeState.Candidate;
-                CurrentTerm += 1;
-                await StartElection();
-                _ = ResetElectionTimer();
-            } 
-
-        });
+            _logger.LogError($"Failed to replay log at index {index}: {ex.Message}");
+            
+        }
     }
 
+    // Sync our "Applied" counter to the end of the log
+    _logger.LogInformation($"Replay complete. Last Applied Index: {_lastApplied}");
+}
+
+    // =========================
+    // PERSISTENT STATE
+    // =========================
+    private async Task PersistStateAsync()
+        {
+            var data = new RaftNodeData
+            {
+                BrokerIdentity = _myIdentity,
+                CurrentTerm = this.CurrentTerm,
+                VotedFor = this.VotedFor,
+                NodeState = this.State,
+                LastTerm = this.CurrentTerm,
+                LeaderCommit = this.LeaderCommit
+            };
+
+            // 2. Wrap the save in a Try/Finally Lock
+            await _diskLock.WaitAsync();
+            try
+            {
+                await RaftNodeState.SaveStateAsync(_basePath, data);
+            }
+            finally
+            {
+                _diskLock.Release();
+            }
+        }
+
+    // =========================
+    // ELECTION LOGIC
+    // =========================
     private async Task StartElection()
     {
         if (_clusterMembers.Count < 1) 
@@ -209,7 +289,9 @@ public class RaftNode
         var ballot = new RequestVoteRequest
         {
             BrokerId = _myIdentity.Id,
-            ElectionTerm = CurrentTerm
+            ElectionTerm = CurrentTerm,
+            LastLogIndex = this.LastLogIndex,  
+            LastLogTerm = await GetLastTermAsync()
         };
         
         // Create a List of tasks to run them in parallel
@@ -258,9 +340,66 @@ public class RaftNode
         return;
     }
 
+private async Task ResetElectionTimer()
+{
+    // 1. STOP if the node is shutting down 
+    if (_disposed) return; 
 
+    // 2. Cancel the old timer safely
+    if (_electionTimeoutCts is not null)
+    {
+        try 
+        {
+            if (!_electionTimeoutCts.IsCancellationRequested)
+            {
+                _electionTimeoutCts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            // Always ensure the old handle is cleaned up
+            _electionTimeoutCts.Dispose();
+        }
+    }
+
+    // 3. Create the new timer
+    _electionTimeoutCts = new CancellationTokenSource();
+    int timeout = NextRandomNumber;
+
+    // 4. Run the election loop
+    var tokenToUse = _electionTimeoutCts.Token;
+
+    _ = Task.Delay(timeout, tokenToUse).ContinueWith(async t =>
+    {
+        // Only start election if WE weren't cancelled
+        if (!t.IsCanceled && !tokenToUse.IsCancellationRequested && !_disposed)
+        {   
+            // Double check state before starting election
+            if (State != NodeState.Leader) 
+            {
+                State = NodeState.Candidate;
+                CurrentTerm += 1;
+                await StartElection();
+                
+                if (State != NodeState.Leader) 
+                {
+                    await ResetElectionTimer();
+                }
+            }
+        } 
+    }, TaskScheduler.Default);
+}
+
+    // =========================
+    // LEADER LOGIC
+    // =========================
     private async Task DeclareVictory()
     {
+
+        Console.WriteLine($"[DeclareVictory] Broker-{Id} Declaring Victory!");
         
         State = NodeState.Leader;
         CurrentLeaderId = _myIdentity.Id;
@@ -276,9 +415,46 @@ public class RaftNode
             _nextIndex[member.Id] = LastLogIndex + 1;
             _matchIndex[member.Id] = 0;
         }
-        //Start Heartbeat loop
-        await StartHeartbeatLoop(_electionTimeoutCts.Token);
 
+        _matchIndex[_myIdentity.Id] = LastLogIndex;
+        _nextIndex[_myIdentity.Id] = LastLogIndex + 1;
+
+            // 2. STOP the old election timer (we won, we don't need to vote anymore)
+            _electionTimeoutCts?.Cancel();
+            _electionTimeoutCts?.Dispose();
+            _electionTimeoutCts = null; // Clear it so we don't accidentally use it
+
+            // 3. CREATE a new token specifically for this leadership term
+            _leaderStopCts = new CancellationTokenSource();
+
+            // 4. Start the loop with the NEW valid token
+            try 
+            {
+                await StartHeartbeatLoop(_leaderStopCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown when stepping down
+            }
+    }
+
+
+    private async Task BecomeFollower(int term)
+    {
+        // 1. If we were Leader, stop the heartbeat loop now!
+        if (State == NodeState.Leader)
+        {
+            _leaderStopCts?.Cancel();
+            _leaderStopCts?.Dispose();
+            _leaderStopCts = null;
+        }
+
+        State = NodeState.Follower;
+        CurrentTerm = term;
+        
+        await ResetElectionTimer();
+
+        await PersistStateAsync();
     }
 
     private async Task StartHeartbeatLoop(CancellationToken ct)
@@ -291,8 +467,13 @@ public class RaftNode
         }
     }
 
+
+    // =========================
+    // HEARTBEATS & REPLICATION
+    // =========================
 private async Task SendHeartbeats()
 {
+    Console.WriteLine($"[SendHeartBeats] Broker-{Id}: Sending Heartbeats...");
     var tasks = new List<Task>();
 
     foreach (var member in _clusterMembers)
@@ -305,12 +486,14 @@ private async Task SendHeartbeats()
             try 
             {
                 long nextIdx = _nextIndex[broker.Id];
+                Console.WriteLine($"[Debug] Broker-{Id}: broker-{broker.Id}'s nextIdx:{nextIdx}");
                 var entriesToSend = new List<LogEntry>();
 
-                // FIX: Actually fetch entries if the follower is behind
+                // Fetch entries if the follower is behind
                 if (LastLogIndex >= nextIdx)
                 {
-                    entriesToSend = await GetLogEntries(nextIdx, LastLogIndex); 
+                    Console.WriteLine($"[SendHeartBeats] Broker:{Id} fetching past log entries for slow follower [nextIdx:{nextIdx},LastLogIndex:{LastLogIndex}]");
+                    entriesToSend = await GetLogEntries(nextIdx, LastLogIndex);  // NOT LOGGED
                 }
 
                 var prevLogIndex = nextIdx - 1;
@@ -324,13 +507,17 @@ private async Task SendHeartbeats()
                     PrevLogIndex = prevLogIndex,
                     PrevLogTerm = await GetTermByIndex(prevLogIndex),
                     LeaderCommit = LeaderCommit,
-                    Entries = entriesToSend // FIX: Now sends actual data
+                    Entries = entriesToSend
                 };
+                
+                Console.WriteLine($"[SendHeartBeats] Broker:{Id}-> Sending Heartbeat to Broker:{broker.Id} -> data:{heartbeat.ToString()}"); //NOT LOGGED
 
                 var response = await _raftTransport.SendAppendEntriesRequest(heartbeat, broker);
-                
-                // FIX: Actually handle the response!
+
+                Console.WriteLine($"[SendHeartBeats] Broker:{Id}-> response received from Broker:{broker.Id} -> response:{response.ToString()}");
+
                 await HandleHeartbeatResponse(response, broker);
+
             }
             catch (Exception ex)
             {
@@ -344,24 +531,6 @@ private async Task SendHeartbeats()
     await Task.WhenAll(tasks);
 }
 
-
-// Helper to retrieve a range of logs from storage
-public async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
-{
-
-    int count = (int) (endIndex - startIndex);
-    var list = new List<LogEntry>();
-
-    var result = await _raftLog.ReadBatchAsync(startIndex,count);
-
-    foreach(var logBytes in result.Messages)
-    {
-        list.Add(DeserializeLogEntry(logBytes));
-    }
-
-    return list;
-}
-  
 private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broker broker)
 {
     // 1. Follower's term is higher so we step down
@@ -389,8 +558,8 @@ private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broke
     if (response.Success)
     {
         // Update match and next indices
-        _matchIndex[broker.Id] = response.LastLogIndex;
         _nextIndex[broker.Id] = response.LastLogIndex + 1;
+        _matchIndex[broker.Id] = response.LastLogIndex;
 
         // 4. Update commit index based on majority replication
         await UpdateCommitIndex();
@@ -399,6 +568,7 @@ private async Task HandleHeartbeatResponse(AppendEntriesResponse response, Broke
 
 private async Task UpdateCommitIndex()
 {
+    
     // Collect all match indices including our own log
     var matchIndices = new List<long> { LastLogIndex };
     
@@ -422,65 +592,135 @@ private async Task UpdateCommitIndex()
         if (termAtIndex == CurrentTerm)
         {
             LeaderCommit = newCommitIndex;
+            await ApplyCommittedEntries();
             await PersistStateAsync();
         }
     }
 }
-
+    // =========================
+    // CLIENT COMMAND HANDLING
+    // =========================
 
 public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
 {
-    // 1. Forwarding Logic
+    Console.WriteLine($"[m-Propose] Broker:{_myIdentity.Id} About to propose new entry");
+    
+    // 1. Forwarding Logic - if we're not the leader, forward to leader
     if (_myIdentity.Id != CurrentLeaderId)
     {
         var leaderBroker = _clusterMembers.FirstOrDefault(broker => broker.Id == CurrentLeaderId);
-        if (leaderBroker == null) return new ForwardCommandResponse
+        if (leaderBroker == null) 
         {
-            Success = false,
-            ErrorMessage = $"No Leader Found"
-        };
+            return new ForwardCommandResponse
+            {
+                Success = false,
+                ErrorMessage = "No Leader Found"
+            };
+        }
+        
         var response = await _raftTransport.ForwardCommand(command, leaderBroker); 
         return response;
     }
 
-
-    // SEND TO CLUSTER 
-
-    // 2. Leader Logic: Create Log Entry
-    // Note: The Switch statement usually happens during 'Apply', not 'Propose'. 
-    // Here we just want to get it into the log safely.
+    // 2. Leader Logic: Capture the index we're proposing BEFORE appending
+    long proposedIndex = LastLogIndex + 1;
+    
     var newEntry = new LogEntry
     {
         Term = CurrentTerm,
-        Index = LastLogIndex + 1, // Determine new index
+        Index = proposedIndex,
         Command = command
     };
-
-    await _raftLog.AppendAsync(SerializeLogEntry(newEntry));
     
-    // We match our own index immediately
+    Console.WriteLine($"[m-Propose] Broker:{_myIdentity.Id} About to append LogEntry at index {proposedIndex}");
+    
+    // 3. Append to our local log
+    await _raftLog.AppendAsync(SerializeLogEntry(newEntry));
+
+    Console.WriteLine($"[DEBUG] After Append, LastLogIndex is: {LastLogIndex}");
+    try 
+    {
+        byte[] readBack = await _raftLog.ReadAsync(proposedIndex);
+        var readEntry = DeserializeLogEntry(readBack);
+        Console.WriteLine($"[DEBUG] Successfully read back entry at index {proposedIndex}: {readEntry?.Index}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[DEBUG] FAILED to read back entry at index {proposedIndex}: {ex.Message}");
+    }
+
+    Console.WriteLine($"[DEBUG] After Append, LastLogIndex is: {LastLogIndex}");
+    
+    // 4. Update our own replication indices
     _matchIndex[_myIdentity.Id] = LastLogIndex; 
     _nextIndex[_myIdentity.Id] = LastLogIndex + 1;
 
-    // 5. Trigger replication 
+    // 5. Trigger replication to followers (fire and forget)
     _ = SendHeartbeats(); 
-
-    // We return true that we accepted it. 
-    return new ForwardCommandResponse
+    
+    // 6. Wait for the entry to be committed (with timeout)
+    var timeout = TimeSpan.FromSeconds(5);
+    var deadline = DateTime.UtcNow + timeout;
+    
+    while (LeaderCommit < proposedIndex && DateTime.UtcNow < deadline)
     {
-        Success = true,
-        ErrorMessage = null
-    }; 
+        await Task.Delay(10);
+        
+        // Additional check: if we're no longer leader, abort
+        if (State != NodeState.Leader)
+        {
+            return new ForwardCommandResponse 
+            { 
+                Success = false, 
+                ErrorMessage = "Lost leadership while waiting for commit" 
+            };
+        }
+    }
+    
+    // 7. Check if we successfully committed
+    if (LeaderCommit >= proposedIndex)
+    {
+        return new ForwardCommandResponse 
+        { 
+            Success = true,
+            ErrorMessage = null
+        };
+    }
+    else
+    {
+        return new ForwardCommandResponse 
+        { 
+            Success = false, 
+            ErrorMessage = "Timeout waiting for commit - entry may still be replicated" 
+        };
+    }
 }
 
-    private async Task BecomeFollower(int term)
+
+    // =========================
+    // LOG ACCESS HELPERS
+    // =========================
+public async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
+{
+
+    int count = (int) (endIndex - startIndex);
+    var list = new List<LogEntry>();
+
+    var result = await _raftLog.ReadBatchAsync(startIndex,count);
+
+    foreach(var logBytes in result.Messages)
     {
-        State = NodeState.Follower;
-        CurrentTerm = term;
-        await PersistStateAsync();
+        list.Add(DeserializeLogEntry(logBytes));
     }
 
+    Console.WriteLine($"[GetLogEntries] Number of Log entries retrieved: {list.Count()}");
 
+    return list;
+}
+
+    // =========================
+    // REQUEST VOTE RPC
+    // =========================
     public async Task<RequestVoteResponse> HandleRequestVote(RequestVoteRequest request)
     {   
         // 1. Term Update Rule: If candidate's term is higher, update state and step down.
@@ -515,7 +755,7 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         };
     }
 
-    private RequestVoteResponse Reject()
+        private RequestVoteResponse Reject()
     {
          return new RequestVoteResponse
             {   
@@ -523,6 +763,10 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
                 CurrentTerm = CurrentTerm
             };
     }
+
+    // =========================
+    // APPEND ENTRIES RPC
+    // =========================
 
     public async Task<AppendEntriesResponse> HandleAppendEntries(AppendEntriesRequest request)
     {
@@ -619,13 +863,29 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
                 {
                     await _raftLog.TruncateFromIndexAsync(entryIndex);
                     await _raftLog.AppendAsync(SerializeLogEntry(entry));
-                    LastLogTerm = entry.Term;
                 }
             }
             else
             {
                 await _raftLog.AppendAsync(SerializeLogEntry(entry));
             }
+        }
+
+        if (request.Entries.Count > 0)
+        {
+            LastLogTerm = request.Entries[^1].Term;
+        }
+
+        // 6. Update Commit Index
+        if (request.LeaderCommit > LeaderCommit)
+        {
+            // We can only commit up to what we actually have in our log
+            LeaderCommit = Math.Min(request.LeaderCommit, LastLogIndex);
+            
+            // Optional: Trigger state machine application here (e.g. ApplyToStateMachine())
+            _logger.LogInformation($"[RAFT] Node {_myIdentity.Id} advanced CommitIndex to {LeaderCommit}");
+            
+            await ApplyCommittedEntries();
         }
 
         return new AppendEntriesResponse
@@ -636,6 +896,40 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         };
     }
 
+        public async Task UpdateLastApplied(long index)
+    {
+        _lastApplied = index;
+    }
+
+    private async Task ApplyCommittedEntries()
+{
+    while (_lastApplied < LeaderCommit)
+    {
+        _lastApplied++;
+        
+        try
+        {
+            byte[] entryBytes = await _raftLog.ReadAsync(_lastApplied);
+            LogEntry entry = DeserializeLogEntry(entryBytes);
+            
+            if (entry?.Command != null)
+            {
+                _clusterState.ApplyCommand(entry.Command);
+                _logger.LogDebug($"Applied entry {_lastApplied} to state machine");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to apply entry {_lastApplied}: {ex.Message}");
+            break; // Stop on error
+        }
+    }
+}
+
+
+    // =========================
+    // SERIALIZATION
+    // =========================
         public byte[] SerializeLogEntry(LogEntry logEntry)
     {
         return JsonSerializer.SerializeToUtf8Bytes(logEntry);
@@ -653,6 +947,11 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
             ?? throw new Exception("Failed to deserialize LogEntry.");
     }
 
+
+
+    // =========================
+    // LOG TERM HELPERS
+    // =========================
     public async Task<int> GetLastTermAsync()
     {
         if (_raftLog is null || _raftLog.IndexLength == 0) return 0;
@@ -670,16 +969,15 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
     private async Task<int> GetTermByIndex(long index)
     {
         // Raft convention: the term at the very beginning of time is 0
-        if (index <= 0) 
-        {
-            return 0; 
-        }
+        if (index < 0) return 0;  
+    
+        if (index >= _raftLog.CurrentOffset) return 0; 
 
         try 
         {
             byte[] logBytes = await _raftLog.ReadAsync(index);
             LogEntry log = DeserializeLogEntry(logBytes);
-            return log.Term;
+            return log?.Term ?? 0;
         }
         catch (Exception)
         {
@@ -688,53 +986,10 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
         }
     }
 
-    public async Task UpdateLastApplied(long index)
-    {
-        _lastApplied = index;
-    }
 
-    private async Task ReplayLog()
-{
-    _logger.LogInformation("Replaying Raft Log to restore Cluster State...");
-    
-     _lastApplied = 0;
-
-    // 1. Iterate through the entire log from the beginning
-    long logSize = _raftLog.CurrentOffset; 
-    
-    for (long index = 0; index < logSize; index++)
-    {
-        try 
-        {
-            // 2. Read Raw Bytes
-            byte[] entryBytes = await _raftLog.ReadAsync(index);
-            
-            // 3. Deserialize (We need a wrapper for Term + Command)
-            LogEntry entry = DeserializeLogEntry(entryBytes);
-
-            // 4. Update the "Brain"
-            if (entry.Command != null)
-            {
-                _clusterState.ApplyCommand(entry.Command);
-            }
-            
-            // 5. Update Local State logic
-            if (entry.Term > this.CurrentTerm)
-            {
-                this.CurrentTerm = entry.Term;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to replay log at index {index}: {ex.Message}");
-            
-        }
-    }
-
-    // Sync our "Applied" counter to the end of the log
-    _logger.LogInformation($"Replay complete. Last Applied Index: {_lastApplied}");
-}
-
+    // =========================
+    // CLUSTER STATE QUERIES
+    // =========================
     public List<Broker> GetBrokerList()
     {
         return _clusterMembers;
@@ -754,15 +1009,5 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
     {
         return await _clusterState.GetListofTopicPartitionsByBrokerId(topic,brokerId);
     }
-
-
-
-    // TODO
-    // Add GetSerialized Brokers
-    // Create GRPC Loop for receiivng cmds
-    // ADD client SDK
-    // TEST TEST TEST
-
-
 
 }
