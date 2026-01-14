@@ -14,8 +14,6 @@ public class BrokerService
     private readonly OffsetManager _offsetManager; // Manages Offsets
     private readonly ILogger<BrokerService> _logger;
 
-    private Object _lock = new object();
-
     private Task? _applyLoopTask;
     private CancellationTokenSource _cts;
 
@@ -75,7 +73,7 @@ public class BrokerService
                 }
                 
                 // Sleep briefly before checking again
-                await Task.Delay(10, ct);
+                await Task.Delay(50, ct);
             }
             catch (OperationCanceledException)
             {
@@ -179,7 +177,7 @@ private async Task HandleCommand(IClusterCommand command)
     }
 
     // =========================================================
-    // RAFT RPC HANDLERS (Called by RaftGrpcService)
+    // Raft gRPC Handlers (Called by RaftGrpcService)
     // =========================================================
 
     public async Task<RequestVoteResponse> HandleRequestVote(RequestVoteRequest request)
@@ -201,7 +199,7 @@ private async Task HandleCommand(IClusterCommand command)
     }
 
     // =========================================================
-    //  Data Plane (Straight to Storage)
+    //  Data Plane TCP Handlers (Straight to Storage)
     // =========================================================
 
      public async Task HandleProduceAsync(string topicName,int partitionId, byte[] payload)

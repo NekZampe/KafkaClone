@@ -1,12 +1,13 @@
 ﻿using System.Threading.Tasks;
+using KafkaClone.Storage.Contracts;
 using Microsoft.Extensions.Logging;
 
 
 namespace KafkaClone.Storage;
 
-public class Partition : IDisposable
+public class Partition : IDisposable, IPartition
 {
-    public int Id;
+    public int Id { get; }
     private readonly string _directoryPath;
     private readonly ILoggerFactory _loggerFactory;
     private FileStream _fileStream;

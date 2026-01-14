@@ -88,6 +88,8 @@ class Program
                     return transport;
                 });
 
+                string logFolder = Path.Combine(basePath, "__nodeLogEntries__");
+
                 // === RAFT NODE (Consensus Engine) ===
                 services.AddSingleton(sp =>
                 {
@@ -95,6 +97,7 @@ class Program
                     var transport = sp.GetRequiredService<IRaftTransport>();
                     var clusterState = sp.GetRequiredService<ClusterState>();
                     var identity = sp.GetRequiredService<Broker>();
+                    Partition partition = new Partition( 0, logFolder, false, partitionLogger, TimeSpan.FromHours(5), 1024);
                     
                     Console.WriteLine("[Init] Initializing RaftNode...");
 
@@ -108,7 +111,8 @@ class Program
                         partitionLogger,
                         transport,
                         clusterState,
-                        otherBrokers
+                        otherBrokers,
+                        partition
                     );
                     
                     var raftNode = task.GetAwaiter().GetResult();

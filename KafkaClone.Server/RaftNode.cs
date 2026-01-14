@@ -8,6 +8,7 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using System.Collections;
 using System.Security;
+using KafkaClone.Storage.Contracts;
 
 namespace KafkaClone.Server;
 
@@ -28,7 +29,7 @@ public class RaftNode : IDisposable
     private readonly ClusterState _clusterState;
     private readonly ILogger<Partition> _logger;
     private IRaftTransport _raftTransport;
-    private readonly Partition _raftLog;
+    private readonly IPartition _raftLog;
     public int Id => _myIdentity.Id;
 
     // =========================
@@ -80,7 +81,7 @@ public class RaftNode : IDisposable
     // Initialization
     // =========================
 
-    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, Partition raftLog, RaftNodeData nodeData,ClusterState clusterState)
+    private RaftNode(string basePath,Broker identity, List<Broker> clusterMembers,ILogger<Partition> logger,IRaftTransport raftTransport, IPartition raftLog, RaftNodeData nodeData,ClusterState clusterState)
     {
         _basePath = basePath;
         _myIdentity = identity;
@@ -134,7 +135,8 @@ public class RaftNode : IDisposable
         ILogger<Partition> partitionLogger, 
         IRaftTransport raftTransport,
         ClusterState clusterState,
-        List<Broker> bootstrapClusterMembers)
+        List<Broker> bootstrapClusterMembers,
+        IPartition partition)
     {
         var clusterMembers = bootstrapClusterMembers;
         RaftNodeState raftNodeState;
@@ -156,12 +158,6 @@ public class RaftNode : IDisposable
             // 2. Persist it for the first time
             await RaftNodeState.CreateAsync(basePath, initialData);
             
-            string newFolder = Path.Combine(basePath, "__nodeLogEntries__");
-
-            // Create Partition. TODO - UPDATE BASE VALUES
-            Partition partition = new Partition(0,newFolder, false, partitionLogger, TimeSpan.FromHours(5), 1024);
-
-            
             var raftNode = new RaftNode(basePath,identity,clusterMembers,partitionLogger,raftTransport,partition,initialData,clusterState);
              _ = raftNode.ResetElectionTimer();
         
@@ -169,22 +165,10 @@ public class RaftNode : IDisposable
         }
             else
             {
-                // 3.0 Define the path where logs are stored
-                string logFolder = Path.Combine(basePath, "__nodeLogEntries__");
 
                 // 3.1 Load existing persistent state (Term, VotedFor, etc.)
                 raftNodeState = await RaftNodeState.LoadAsync(statePath) 
                             ?? throw new Exception("Failed to load existing state.");
-
-                // 3.2 Initialize the partition. 
-                // The constructor will automatically find and open existing .log and .index files.
-                Partition partition = new Partition(
-                    0, 
-                    logFolder, 
-                    false, 
-                    partitionLogger, 
-                    TimeSpan.FromHours(5), 
-                    1024);
 
                 // 3.3 Create the node instance with the loaded partition
                 var raftNode = new RaftNode(
@@ -596,6 +580,8 @@ private async Task UpdateCommitIndex()
             await PersistStateAsync();
         }
     }
+
+    Console.WriteLine($"[DEBUG] Broker:{Id} New Commit index: {LeaderCommit}");
 }
     // =========================
     // CLIENT COMMAND HANDLING
@@ -954,7 +940,7 @@ public async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
     // =========================
     public async Task<int> GetLastTermAsync()
     {
-        if (_raftLog is null || _raftLog.IndexLength == 0) return 0;
+        if (_raftLog is null || _raftLog.CurrentOffset == 0) return 0;
 
         byte[] lastLogBytes = await _raftLog.ReadAsync(LastLogIndex - 1);
 

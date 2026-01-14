@@ -1,8 +1,11 @@
+using System.Collections.Concurrent;
 using KafkaClone.Server;
 using KafkaClone.Server.DTOs;
 using KafkaClone.Shared;
 using KafkaClone.Storage;
+using KafkaClone.Storage.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Collections.Immutable;
 
 namespace KafkaClone.Tests
 {
@@ -102,6 +105,8 @@ namespace KafkaClone.Tests
 
                     var clusterState = await ClusterState.InitializeAsync(path);
 
+                    var mockPartition = new MockPartition();
+
                     // Create the Node
                     var node = await RaftNode.InitializeNode(
                         path,
@@ -109,7 +114,8 @@ namespace KafkaClone.Tests
                         NullLogger<Partition>.Instance,
                         Transport,
                         clusterState,
-                        peerBrokers
+                        peerBrokers,
+                        mockPartition
                     );
 
                     // Thread-safe registration since multiple tasks hit this at once
@@ -161,4 +167,186 @@ namespace KafkaClone.Tests
     }
 }
     }
+
+
+    // ==================================================================================
+    // 1. MOCK PARTITION
+    // ==================================================================================
+    public class MockPartition : IPartition
+    {
+    private static readonly Random _rand = new Random();
+
+    public int Id { get; } = Random.Shared.Next();
+    public long CurrentOffset
+        {
+            get
+            {
+                var snapshot = _logs.ReadAll();
+                if (snapshot.Count == 0)
+                    return 0;
+                return (long)snapshot.Count();
+            }
+        }
+
+    private ConcurrentList<byte[]> _logs = new ConcurrentList<byte[]>();
+
+    // private ConcurrentList<long> _indexes = new ConcurrentList<long>();
+
+    private Object _lock = new();
+
+    public async Task<long> AppendAsync(byte[] data)
+        {
+            if (data != null)
+            {
+                _logs.Add(data);
+                long newOffset = CurrentOffset + 1;
+                return newOffset;
+            }
+            return -1L;
+        }
+
+    public async Task<long> AppendBatchAsync(List<byte[]> data)
+        {
+            long newOffset = CurrentOffset;
+
+            foreach(var log in data)
+            {
+                if(log is not null)
+                {
+                _logs.Add(log);
+                newOffset = newOffset + 1;
+                }
+            }
+            
+            return newOffset;
+        }
+
+        public Task<byte[]> ReadAsync(long offset)
+        {
+            if (offset < 0 || offset >= _logs.Count)
+                throw new IndexOutOfRangeException($"Offset {offset} not found");
+
+            var log = _logs.ReadAt((int)offset);
+            return Task.FromResult(log);
+        }
+
+    public Task<(List<byte[]> Messages, long NextOffset)> ReadBatchAsync(long offset,int maxCount)
+        {
+            if (offset < 0 || offset >= _logs.Count)
+                throw new IndexOutOfRangeException($"Offset {offset} not found");
+
+            var snapshot = _logs.ReadAll();
+            List<byte[]> Messages = new();
+            long nextOffset = snapshot.Count();
+
+            for(int i = (int)offset; i < maxCount; i++)
+            {
+                if(i >= snapshot.Count()){break;}
+
+                Messages.Add(snapshot[i]);
+                nextOffset = nextOffset + 1; 
+            }
+            
+            var result = (Messages,nextOffset);
+
+            return Task.FromResult(result);
+            
+        }
+
+
+        public Task TruncateFromIndexAsync(long index)
+        {
+            if (index < 0) throw new ArgumentOutOfRangeException(nameof(index));
+
+            int lastIndex = (int)index;
+
+            _logs.TruncateAt(lastIndex);
+
+            return Task.CompletedTask;
+        }
+        public void Dispose()
+        {
+        }
+
+}
+
+
+
+public class ConcurrentList<T>
+{
+    private readonly List<T> _list = new();
+    private readonly ReaderWriterLockSlim _lock = new();
+
+    // Add a new item
+    public void Add(T item)
+    {
+        _lock.EnterWriteLock();
+        try
+        {
+            _list.Add(item);
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    // Read a snapshot of the list
+    public List<T> ReadAll()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return new List<T>(_list); // copy to avoid modification during enumeration
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
+    // Read item by index safely
+    public T ReadAt(int index)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _list[index];
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
+    public int Count
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try { return _list.Count; }
+            finally { _lock.ExitReadLock(); }
+        }
+    }
+
+    public void TruncateAt(int index)
+{
+    _lock.EnterWriteLock();
+    try
+    {
+        if (index < 0)
+        {
+            _list.Clear(); // remove all
+        }
+        else if (index < _list.Count - 1)
+        {
+            _list.RemoveRange(index + 1, _list.Count - (index + 1));
+        }
+    }
+    finally
+    {
+        _lock.ExitWriteLock();
+    }
+}
+}
 }
