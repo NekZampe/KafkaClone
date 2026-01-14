@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Text.Json.Serialization;
 
 namespace KafkaClone.Server.DTOs
 {
@@ -9,6 +10,9 @@ namespace KafkaClone.Server.DTOs
 //-------------------------------- LOG TYPES ------------------------------------------------
 
     // 1. The Interface
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+    [JsonDerivedType(typeof(CreateTopic), typeDiscriminator: "CreateTopic")]
+    [JsonDerivedType(typeof(RegisterBroker), typeDiscriminator: "RegisterBroker")]
     public interface IClusterCommand
     {
         string CommandType { get; }

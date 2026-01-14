@@ -40,7 +40,7 @@ public class RaftNode : IDisposable
     public int? VotedFor { get; private set; }
     public int CurrentTerm { get; private set; }
     public int LastLogTerm;
-    public long LeaderCommit = 0; // Highest index of commited file
+    public long LeaderCommit = -1; // Highest index of commited file
     private volatile bool _disposed = false;
 
     // =========================
@@ -51,8 +51,8 @@ public class RaftNode : IDisposable
     // =========================
     // LOG STATE
     // =========================
-    public long LastLogIndex => _raftLog.CurrentOffset;
-    private long _lastApplied = 0;
+    public long LastLogIndex => _raftLog.CurrentOffset - 1;
+    private long _lastApplied = -1;
     public long LastApplied => _lastApplied;
 
     // =========================
@@ -152,7 +152,7 @@ public class RaftNode : IDisposable
                 CurrentTerm = 0,
                 VotedFor = null,
                 LastTerm = 0,
-                LeaderCommit = 0
+                LeaderCommit = -1
             };
 
             // 2. Persist it for the first time
@@ -195,7 +195,7 @@ public class RaftNode : IDisposable
 {
     _logger.LogInformation("Replaying Raft Log to restore Cluster State...");
     
-     _lastApplied = 0;
+     _lastApplied = -1;
 
     // 1. Iterate through the entire log from the beginning
     long logSize = _raftLog.CurrentOffset; 
@@ -397,7 +397,7 @@ private async Task ResetElectionTimer()
         foreach( var member in _clusterMembers)
         {
             _nextIndex[member.Id] = LastLogIndex + 1;
-            _matchIndex[member.Id] = 0;
+            _matchIndex[member.Id] = -1;
         }
 
         _matchIndex[_myIdentity.Id] = LastLogIndex;
@@ -689,10 +689,12 @@ public async Task<ForwardCommandResponse> Propose(IClusterCommand command)
 public async Task<List<LogEntry>> GetLogEntries(long startIndex, long endIndex)
 {
 
-    int count = (int) (endIndex - startIndex);
+    int count = (int) (endIndex - startIndex) + 1;
+    if (count <= 0) return new List<LogEntry>();
     var list = new List<LogEntry>();
 
     var result = await _raftLog.ReadBatchAsync(startIndex,count);
+
 
     foreach(var logBytes in result.Messages)
     {

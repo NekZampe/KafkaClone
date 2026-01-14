@@ -69,7 +69,7 @@ class Program
                 {
                     var logger = sp.GetRequiredService<ILogger<ClusterState>>();
                     Console.WriteLine("[Init] Loading ClusterState...");
-                    var task = ClusterState.InitializeAsync(basePath);
+                    var task = ClusterState.InitializeAsync(basePath,bootstrapCluster);
                     var state = task.GetAwaiter().GetResult();
                     Console.WriteLine($"[Init] ✓ ClusterState loaded");
                     return state;

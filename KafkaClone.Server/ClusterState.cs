@@ -20,12 +20,23 @@ public class ClusterState
     private readonly object _lock = new object();
     private readonly string _filePath;
 
-    private ClusterState(string basePath)
+    private ClusterState(string basePath,List<Broker> brokers)
     {
         _filePath = Path.Combine(basePath, "cluster_state.json");
+
+        foreach(var broker in brokers)
+        {
+            _brokers[broker.Id] = broker;
+        }
+
     }
 
-    public Dictionary<int, int> CalculateAssignments(int partitions)
+    protected ClusterState() 
+    { 
+        // Moq needs this to create the proxy object.
+    }
+
+    public virtual Dictionary<int, int> CalculateAssignments(int partitions)
     {
         var assignments = new Dictionary<int, int>();
         var activeBrokers = _brokers.Keys.OrderBy(x => x).ToList();
@@ -40,9 +51,9 @@ public class ClusterState
         return assignments;
     }
 
-    public static async Task<ClusterState> InitializeAsync(string basePath)
+    public static async Task<ClusterState> InitializeAsync(string basePath,List<Broker> brokers)
     {
-        var state = new ClusterState(basePath);
+        var state = new ClusterState(basePath,brokers);
         await state.LoadFromDisk();
         return state;
     }
@@ -72,7 +83,7 @@ public class ClusterState
     }
 
     // === WRITE PATH (Called by RaftNode) ===
-    public bool ApplyCommand(IClusterCommand command)
+    public virtual bool ApplyCommand(IClusterCommand command)
     {
         lock (_lock)
         {
@@ -131,7 +142,7 @@ public class ClusterState
 
     // === READ PATH (Used by BrokerService & TCP) ===
 
-    public int? GetPartitionOwner(string topic, int partitionId)
+    public virtual int? GetPartitionOwner(string topic, int partitionId)
     {
         lock (_lock)
         {
@@ -153,7 +164,7 @@ public class ClusterState
     }
     
 // Returns: (Byte Array of all brokers, Count of brokers)
-public async Task<(byte[], int)> GetSerializedBrokersAsync()
+public virtual async Task<(byte[], int)> GetSerializedBrokersAsync()
 {
     List<Broker> snapshot;
     lock (_lock)
@@ -173,7 +184,7 @@ public async Task<(byte[], int)> GetSerializedBrokersAsync()
 }
 
 // Returns: (Byte Array of partition assignments, Count of partitions)
-public async Task<(byte[], int)> GetSerializedTopicMetadataAsync(string topicName)
+public virtual async Task<(byte[], int)> GetSerializedTopicMetadataAsync(string topicName)
 {
     TopicMetaData topic;
     
@@ -212,7 +223,7 @@ public async Task<(byte[], int)> GetSerializedTopicMetadataAsync(string topicNam
     }
 
     // Return all relevant partitionIds for a given topic based on broker Id
-    public async Task<int[]> GetListofTopicPartitionsByBrokerId(string topic, int brokerId)
+    public virtual async Task<int[]> GetListofTopicPartitionsByBrokerId(string topic, int brokerId)
     {
         List<int> partitionIds = new List<int>();
 

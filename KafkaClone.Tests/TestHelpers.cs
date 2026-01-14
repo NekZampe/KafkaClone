@@ -100,10 +100,7 @@ namespace KafkaClone.Tests
                     _tempPaths.Add(path);
                     Directory.CreateDirectory(path);
 
-                    // Filter out self from the peer list
-                    var peerBrokers = brokers.Where(b => b.Id != index).ToList();
-
-                    var clusterState = await ClusterState.InitializeAsync(path);
+                    var clusterState = await ClusterState.InitializeAsync(path,brokers);
 
                     var mockPartition = new MockPartition();
 
@@ -114,7 +111,7 @@ namespace KafkaClone.Tests
                         NullLogger<Partition>.Instance,
                         Transport,
                         clusterState,
-                        peerBrokers,
+                        brokers,
                         mockPartition
                     );
 
@@ -189,10 +186,6 @@ namespace KafkaClone.Tests
         }
 
     private ConcurrentList<byte[]> _logs = new ConcurrentList<byte[]>();
-
-    // private ConcurrentList<long> _indexes = new ConcurrentList<long>();
-
-    private Object _lock = new();
 
     public async Task<long> AppendAsync(byte[] data)
         {
